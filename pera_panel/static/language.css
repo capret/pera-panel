@@ -8,3 +8,13 @@ html[lang="zh-CN"] h1, html[lang="zh-CN"] .camp-card h2, html[lang="zh-CN"] .dia
 .save-file-picker { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
 #save-filename { overflow-wrap:anywhere; color:var(--muted); font-size:12px; }
 @media(max-width:700px) { .topbar-right { gap:8px; } .topbar { gap:12px; } .topbar > div:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .language-switch > span { display:none; } .language-switch select { min-width:95px; } }
+.recovery-card, .native-rollback-card { margin-bottom: 20px; }
+.player-candidate { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line, #e6e9e1); }
+.player-candidate small { display: block; margin-top: 5px; color: var(--muted, #747c70); overflow-wrap: anywhere; }
+.player-permission-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.player-permission-actions .button { padding: 7px 10px; font-size: 12px; }
+#player-candidates { max-height: 360px; overflow-y: auto; }
+#character-source, #character-account { max-width: 100%; min-width: 0; }
+.native-rollback-card .control-row { align-items: end; }
+.native-rollback-card .control-row label { margin-bottom: 0; }
+@media (max-width: 760px) { .player-candidate { align-items: start; flex-direction: column; } .recovery-card .card-heading { flex-wrap: wrap; } }

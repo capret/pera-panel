@@ -72,6 +72,42 @@ def test_missing_token_rejected_before_spawn(runtime):
     assert not runtime.processes
 
 
+def test_native_rollback_sends_only_to_master_and_keeps_processes(runtime):
+    world = validate_world({"name": "Native", "token": "abc", "caves": True})
+    runtime.store.write_world(world)
+    runtime.start(world)
+    pids = {shard: process.pid for shard, process in runtime.processes.items()}
+    result = runtime.rollback(world["id"], 2)
+    assert "requested" in result["message"]
+    assert {shard: process.pid for shard, process in runtime.processes.items()} == pids
+    assert runtime.active(world["id"])
+    assert not list(runtime.store.backups.rglob("backup.json"))
+    runtime.stop()
+    assert "c_rollback(2)" in runtime.log(world["id"], "Master")
+    assert "c_rollback" not in runtime.log(world["id"], "Caves")
+
+
+@pytest.mark.parametrize("count", [0, -1, 51, True, "1", "1);os.execute('bad')", None])
+def test_native_rollback_rejects_invalid_counts(runtime, count):
+    world = validate_world({"name": "Native"})
+    runtime.store.write_world(world)
+    with pytest.raises(PanelError, match="rollback count"):
+        runtime.rollback(world["id"], count)
+
+
+def test_native_rollback_rejects_missing_configured_shards(runtime):
+    world = validate_world({"name": "Native", "caves": True})
+    runtime.store.write_world(world)
+    runtime.world_id = world["id"]
+    process = MagicMock()
+    process.poll.return_value = None
+    runtime.processes = {"Master": process}
+    with pytest.raises(PanelError, match="all configured shards"):
+        runtime.rollback(world["id"], 1)
+    process.stdin.write.assert_not_called()
+    runtime.processes = {}
+
+
 def test_stop_timeout_does_not_force_kill_in_normal_operations(runtime):
     process = MagicMock()
     process.poll.return_value = None

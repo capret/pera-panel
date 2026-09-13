@@ -163,7 +163,7 @@ Cluster_1/
   Master/
     save/session/<session-id>/...    # World snapshots and player saves
     modoverrides.lua                # Optional inherited mod settings
-    server.ini                      # Optional original shard ID
+    server.ini                      # Optional original shard ID and player path encoding
   Caves/                            # Optional; include its complete save if used
     save/session/<session-id>/...
     modoverrides.lua
@@ -179,6 +179,31 @@ The archive and its saved data are validated and staged before the running world
 Limits: **256 MiB ZIP**, **2 GiB expanded**, **512 MiB per file**, and **20,000 entries**. Unsafe paths, symbolic links, encrypted files, duplicate paths, and excessive expansion are rejected. Temporary uploads are removed after successful or failed jobs. The archive must have enough free space to stage its contents and back up the current world. A power loss can leave `.upload-*`, `.import-*`, or `.previous-import-*` directories; inspect these before cleanup, especially the recovery directories.
 
 If you already deployed the Nginx example, update `client_max_body_size` to **257m**, allow sufficient upload time, and reload Nginx. The updated example includes these values. Ordinary JSON API requests still have a 256 KiB limit.
+
+## Imported characters and player permissions
+
+A matching `save/cached_userid` is not enough to identify the saved character. DST's save lookup also depends on online/offline mode and player-path encoding. An offline local world can contain `OU_...` or encoded player directories that do not match the online `KU_...` identity. See the [game's save lookup code](https://github.com/taichunmin/dont-starve-together-game-scripts/blob/master/saveindex.lua), particularly `GetUserSessionFileInClusterSlot`.
+
+Import keeps all shard `save` files byte-for-byte, including `cached_userid`, player snapshots and metadata. It now inherits `[ACCOUNT] encode_user_path` from each `server.ini`. Without that setting it infers a uniform raw (`KU_`/`OU_`) or encoded character directory layout; ambiguous/empty layouts retain the game default. This fixes the previous loss of imported path-encoding configuration. Try importing the original ZIP again and joining before manually recovering a character.
+
+**World settings → Player permissions** shows known IDs from raw player save paths, cached-owner records, authenticated lines in an uploaded shard `server_log.txt` (up to 2 MiB), and players seen by the running server. New authenticated joins are persisted even when the dashboard is closed. With the dashboard open, bounded console queries also discover connected accounts and ask DST to encode their destination paths. The list refreshes without overwriting unsaved settings. Candidate buttons only add IDs to the form; stop the world and save settings to apply them. Existing permission lists are never replaced by imported candidates.
+
+Cached-owner entries are labelled as unverified. Encoded and offline character directories appear separately without inventing Klei IDs; the panel cannot automatically infer who owns each offline character. Optional plain-text `.meta` files supply character names; unknown/compressed metadata is left untouched. Discovery is limited to 1,000 records and a bounded directory scan, and does not execute uploaded Lua.
+
+If joining still creates a new character, use **Backups & rollback → Recover an imported character**:
+
+1. Keep the dashboard open and join online in the same shard as the original character. If shown character selection, create a temporary character so a destination save exists.
+2. Wait until your account appears in **Online destination account**, then leave and stop the world. Click **Refresh saved characters**.
+3. Select the original offline/encoded character folder and your online account. Confirm the world name. The panel requires a destination folder identified by the game and already present in the same session and shard.
+4. A **Before character recovery** backup is created, then the selected character files replace the destination folder. The original folder is kept. Start the world and verify the character. Repeat for the other shard if it has separate character data; this operation does not change shard migration routing.
+
+This is explicit character-file recovery, not an automatic offline-to-online world converter. The panel does not rewrite account caches, guess encoded IDs, merge external `client_save` data, or alter mod-specific ownership records. If your account never appears as a destination, retain the original ZIP and inspect the Master/Caves logs before changing files manually. Recovery can be reversed by restoring its safety backup. Synthetic filesystem/console tests verify the workflow; matching a real offline save and its mod data still requires an in-game check.
+
+## Native rollback and full backup restoration
+
+**Native game rollback** sends `c_rollback(count)` to Master using the existing dedicated-server console connection. Both configured shards must be running; the count must be an integer from 1 to the world's snapshot retention setting. The panel does not stop or relaunch processes for this action. The game decides whether the requested snapshot exists and performs the reload. The job records that the request was sent, not that the reload succeeded: check game logs. Players may see loading or reconnect. This behavior follows the [game's console command](https://github.com/taichunmin/dont-starve-together-game-scripts/blob/master/consolecommands.lua).
+
+**Restore backup** remains a separate full-folder operation. It stops a running world, makes a safety backup, restores both shards and panel settings, then starts the world again. Native rollback does not restore panel settings or make a panel backup.
 
 ## Worlds, mods, and backups
 

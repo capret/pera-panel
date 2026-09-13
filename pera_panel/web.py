@@ -167,6 +167,8 @@ def create_app(config, service=None):
             return operation(f"{action.title()} command", lambda: service.runtime.command(identifier, action, message))
         if action == "backup":
             return operation("Create backup", lambda: service.backup(identifier, data.get("label", "Manual backup")))
+        if action == "rollback":
+            return operation("Native rollback", lambda: service.rollback(identifier, data.get("count"), data.get("confirmation")))
         if action == "update-mods":
             def update_mods():
                 service.require_stopped(identifier)
@@ -175,6 +177,27 @@ def create_app(config, service=None):
                 service.runtime.update_mods(service.store.get(identifier))
             return operation("Download Workshop mods", update_mods)
         raise PanelError("Unknown action.", 404)
+
+    @app.get("/api/worlds/<identifier>/players")
+    def players(identifier):
+        service.store.get(identifier)
+        if not service.busy:
+            service.runtime.request_players(identifier)
+        return jsonify(players=service.players.list(identifier))
+
+    @app.get("/api/worlds/<identifier>/characters")
+    def saved_characters(identifier):
+        with service.lock:
+            if service.busy:
+                raise PanelError("Another operation is in progress. Wait for it to finish.", 409)
+            return jsonify(characters=service.character_list(identifier))
+
+    @app.post("/api/worlds/<identifier>/recover-character")
+    def recover_character(identifier):
+        data = body()
+        service.store.get(identifier)
+        return operation("Recover character", lambda: service.recover_character(
+            identifier, data.get("source"), data.get("userid"), data.get("confirmation")))
 
     @app.get("/api/worlds/<identifier>/backups")
     def backups(identifier):
@@ -185,7 +208,7 @@ def create_app(config, service=None):
         data = body()
         if data.get("confirmation") != service.store.get(identifier)["name"]:
             raise PanelError("Type the world name exactly to roll back.")
-        return operation("Roll back world", lambda: service.restore(identifier, snapshot))
+        return operation("Restore backup", lambda: service.restore(identifier, snapshot))
 
     @app.delete("/api/worlds/<identifier>/backups/<snapshot>")
     def delete_backup(identifier, snapshot):

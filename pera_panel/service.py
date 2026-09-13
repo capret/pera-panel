@@ -12,6 +12,7 @@ import tempfile
 import uuid
 
 from .runtime import Runtime
+from .players import PlayerRegistry, USER_ID, characters
 from .save_import import stage_save
 from .storage import PanelError, Store, line, validate_world, write_json
 
@@ -19,7 +20,9 @@ from .storage import PanelError, Store, line, validate_world, write_json
 class Service:
     def __init__(self, root, game, runtime_factory=Runtime):
         self.store = Store(root, game)
+        self.players = PlayerRegistry(self.store)
         self.runtime = runtime_factory(self.store)
+        self.runtime.players = self.players
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pera-operations")
         self.lock = threading.RLock()
         self.upload_lock = threading.Lock()
@@ -180,6 +183,7 @@ class Service:
         current = self.store.get(identifier)
         saved = json.loads((source / "pera.json").read_text(encoding="utf-8"))
         saved.setdefault("shard_ids", {"Master": "1", "Caves": "2"})
+        saved.setdefault("encode_user_path", {})
         restored = validate_world(saved, current)
         # Preserve current credentials and boot policy while rolling back world data and settings.
         restored.update(token=current["token"], cluster_key=current["cluster_key"], autostart=current["autostart"])
@@ -217,7 +221,8 @@ class Service:
             prepared = Path(temporary) / "prepared"
             metadata = stage_save(upload, prepared, inherit_mods)  # Validate before stopping the world.
             changes = {"caves": metadata["caves"],
-                       "shard_ids": {"Master": "1", "Caves": "2", **metadata["shard_ids"]}}
+                       "shard_ids": {"Master": "1", "Caves": "2", **metadata["shard_ids"]},
+                       "encode_user_path": metadata["encode_user_path"]}
             if inherit_mods:
                 changes["mods"] = metadata["mods"]
             restored = validate_world(changes, current)
@@ -230,6 +235,9 @@ class Service:
                 try:
                     prepared.rename(root)
                     self.store.write_world(restored)
+                    self.players.discover(identifier)
+                    self.players.record_many(identifier, [{"userid": userid, "name": name, "source": "imported_log"}
+                                                          for userid, name in metadata["players"].items()])
                 except Exception:
                     if root.exists():
                         shutil.rmtree(root)
@@ -244,6 +252,50 @@ class Service:
                         "message": (f"Local save imported with {len(restored['mods'])} mod settings. "
                                     if inherit_mods else "Local save imported; panel mods kept. ")
                                    + "The world is stopped. Enabled mods download on the next start."}
+
+    def rollback(self, identifier, count, confirmation):
+        if confirmation != self.store.get(identifier)["name"]:
+            raise PanelError("Type the world name exactly to roll back.")
+        return self.runtime.rollback(identifier, count)
+
+    def character_list(self, identifier):
+        self.store.get(identifier)
+        self.players.discover(identifier)
+        return characters(self.store.world_path(identifier))
+
+    def recover_character(self, identifier, source, userid, confirmation):
+        """Restore a chosen character into an existing, game-identified online save folder."""
+        self.require_stopped(identifier)
+        if confirmation != self.store.get(identifier)["name"]:
+            raise PanelError("Type the world name exactly to recover a character.")
+        if not isinstance(userid, str) or not USER_ID.fullmatch(userid):
+            raise PanelError("Choose the online Klei account that should receive this character.")
+        origin = self.players.character_path(identifier, source)
+        shard = source.split("/")[0]
+        player = next((p for p in self.players.list(identifier) if p["userid"] == userid), {})
+        folder = player.get("folders", {}).get(shard)
+        if "console" not in player.get("sources", []) or not folder:
+            raise PanelError("Join online while this panel is open so the game can identify your destination folder, then stop the world.", 409)
+        relative = "/".join(source.split("/")[:-1] + [folder])
+        target = self.players.character_path(identifier, relative)
+        if origin == target:
+            raise PanelError("The selected character already belongs to this destination folder.")
+        if any(path.is_symlink() for path in origin.rglob("*")) or any(path.is_symlink() for path in target.rglob("*")):
+            raise PanelError("Linked character files are not supported.")
+        safety = self._snapshot(identifier, "Before character recovery", system_label=True)
+        with tempfile.TemporaryDirectory(prefix=".character-", dir=self.store.clusters) as temporary:
+            prepared = Path(temporary) / "prepared"
+            previous = target.with_name(".previous-character-" + uuid.uuid4().hex)
+            shutil.copytree(origin, prepared)
+            target.rename(previous)
+            try:
+                prepared.rename(target)
+            except Exception:
+                previous.rename(target)
+                raise
+            shutil.rmtree(previous)
+        return {"safety_backup_id": safety,
+                "message": "Character files recovered for the selected shard. The world is stopped. Start it and verify your character in game."}
 
     def delete(self, identifier, confirmation):
         world = self.store.get(identifier)

@@ -36,6 +36,12 @@ class FakeRuntime:
     def command(self, identifier, action, message=""):
         self.events.append((action, message))
 
+    def request_players(self, identifier):
+        pass
+
+    def rollback(self, identifier, count):
+        self.events.append(("rollback", count))
+
     def log(self, identifier, shard):
         return "Test output"
 

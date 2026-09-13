@@ -1,8 +1,11 @@
 """Own the game processes as an unprivileged user, with bounded logs and graceful shutdown."""
 from collections import deque
+import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import re
+import secrets
 import subprocess
 import threading
 import time
@@ -10,6 +13,7 @@ import time
 import psutil
 
 from .storage import PanelError, lua
+from .players import PlayerRegistry, USER_ID, FOLDER
 
 
 class Runtime:
@@ -21,6 +25,9 @@ class Runtime:
         self.started_at = None
         self.lock = threading.RLock()
         self.updater = None
+        self.players = PlayerRegistry(store)
+        self.probes = {}
+        self.probe_at = 0
 
     def binary(self):
         binary = self.store.game / "bin64" / "dontstarve_dedicated_server_nullrenderer_x64"
@@ -46,17 +53,22 @@ class Runtime:
         path = self.store.logs / world["id"] / f"{shard}.log"
         path.parent.mkdir(parents=True, exist_ok=True)
         reader = threading.Thread(target=self._read_log,
-                                  args=(process, path, [world["token"], world["cluster_key"], world["password"]]),
+                                  args=(process, path, [world["token"], world["cluster_key"], world["password"]],
+                                        world["id"], shard),
                                   daemon=True)
         reader.start()
         self.readers[process.pid] = reader
         return process
 
-    @staticmethod
-    def _read_log(process, path, secrets):
+    def _read_log(self, process, path, secrets, identifier, shard):
         handler = RotatingFileHandler(path, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
         try:
-            for output in iter(lambda: process.stdout.readline(16384), ""):
+            for output in iter(lambda: process.stdout.readline(65536), ""):
+                try:
+                    self.players.log_line(identifier, output)
+                    self._player_response(identifier, shard, output)
+                except (OSError, ValueError):
+                    logging.exception("Could not record player discovery")
                 for secret in secrets:
                     if secret:
                         output = output.replace(secret, "[redacted]")
@@ -111,6 +123,8 @@ class Runtime:
             self.processes = {}
             self.world_id = world["id"]
             self.started_at = time.time()
+            self.probes = {}
+            self.probe_at = 0
             try:
                 for shard in (["Master", "Caves"] if world["caves"] else ["Master"]):
                     self.processes[shard] = self._spawn(
@@ -124,8 +138,10 @@ class Runtime:
             raise PanelError("A shard exited during startup. Inspect its log for the cause.", 502)
 
     @staticmethod
-    def _send(process, command):
+    def _send(process, command, required=False):
         if process.poll() is not None:
+            if required:
+                raise PanelError("The game console disconnected. Inspect the shard log.", 409)
             return
         try:
             process.stdin.write(command + "\n")
@@ -147,6 +163,61 @@ class Runtime:
                 self._send(master, f"c_announce({lua(message)})")
             else:
                 raise PanelError("Unknown console action.")
+
+    def rollback(self, identifier, count):
+        with self.lock:
+            world = self.store.get(identifier)
+            if type(count) is not int or not 1 <= count <= world["snapshots"]:
+                raise PanelError("Choose a rollback count between 1 and {maximum}.", params={"maximum": world["snapshots"]})
+            expected = ["Master", "Caves"] if world["caves"] else ["Master"]
+            if self.world_id != identifier or any(shard not in self.processes or self.processes[shard].poll() is not None
+                                                  for shard in expected):
+                raise PanelError("Start all configured shards before requesting native rollback.", 409)
+            self._send(self.processes["Master"], f"c_rollback({count})", required=True)
+        return {"message": "Native rollback requested. Check the game logs for completion; DST reloads the world and players may reconnect."}
+
+    def request_players(self, identifier):
+        with self.lock:
+            if not self.active(identifier) or time.monotonic() - self.probe_at < 10:
+                return
+            self.probe_at = time.monotonic()
+            for shard, process in self.processes.items():
+                if process.poll() is not None:
+                    continue
+                marker = "PERA_PLAYERS_" + secrets.token_hex(16)
+                self.probes[(identifier, shard)] = marker
+                # Only game-generated responses with the current random marker can provide path mappings.
+                command = ('local p={} for _,v in ipairs(TheNet:GetClientTable() or {}) do '
+                           'if v.performance==nil and #p<64 then '
+                           'local ok,f=pcall(function() return TheNet:GetDefaultEncodeUserPath() '
+                           'and TheNet:EncodeUserPath(v.userid) or v.userid end) '
+                           'p[#p+1]={userid=v.userid,name=string.sub(v.name or "",1,100),folder=ok and f or ""} '
+                           'end end print("' + marker + '"..json.encode(p))')
+                self._send(process, command)
+
+    def _player_response(self, identifier, shard, output):
+        marker = self.probes.get((identifier, shard))
+        if not marker:
+            return
+        output = re.sub(r"^\[[0-9:.]+\]:\s*", "", output).rstrip("\r\n")
+        if not output.startswith(marker):
+            return
+        try:
+            rows = json.loads(output[len(marker):])
+        except ValueError:
+            return
+        if not isinstance(rows, list) or len(rows) > 64:
+            return
+        players = []
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get("userid"), str) or not USER_ID.fullmatch(row["userid"]):
+                continue
+            folder = row.get("folder", "")
+            if not isinstance(folder, str) or not FOLDER.fullmatch(folder):
+                folder = ""
+            players.append({"userid": row["userid"], "name": row.get("name", ""), "source": "console",
+                            "folder": folder, "shard": shard})
+        self.players.record_many(identifier, players)
 
     def stop(self, force=False):
         with self.lock:

@@ -112,6 +112,11 @@ def validate_world(data, previous=None):
     ) or len(set(shard_ids.values())) != 2:
         raise PanelError("Shard IDs must be two distinct numeric strings for Master and Caves.")
     result["shard_ids"] = shard_ids
+    formats = data.get("encode_user_path", old.get("encode_user_path", {}))
+    if not isinstance(formats, dict) or any(k not in ("Master", "Caves") or type(v) is not bool
+                                            for k, v in formats.items()):
+        raise PanelError("Player path encoding must be a boolean for each shard.")
+    result["encode_user_path"] = formats
     return result
 
 
@@ -198,6 +203,8 @@ class Store:
                 "SHARD": {"is_master": index == 0, "name": shard,
                           "id": world.get("shard_ids", {}).get(shard, str(index + 1))},
                 "STEAM": {"authentication_port": 8766 + index, "master_server_port": 27016 + index},
+                **({"ACCOUNT": {"encode_user_path": world["encode_user_path"][shard]}}
+                   if shard in world.get("encode_user_path", {}) else {}),
             }))
             atomic_write(root / shard / "modoverrides.lua", "return " + lua(mods) + "\n")
             overrides = world["master_overrides" if index == 0 else "caves_overrides"]

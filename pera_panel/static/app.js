@@ -5,6 +5,7 @@ const {t, descriptor: msg} = I18n;
 const h = (key, params = {}) => `<span data-i18n-message="${escapeHTML(JSON.stringify(msg(key, params)))}">${escapeHTML(t(key, params))}</span>`;
 let state = null, selected = null, currentTab = 'overview', mods = [], confirmCallback = null, polling = false;
 let importTarget = null, uploading = false;
+let playerWorld = null, playerRows = [], characterRows = [], characterWorld = null, playerPolling = false, playerPollAt = 0;
 const seenJobs = new Set();
 const csrf = $('meta[name="csrf-token"]').content;
 
@@ -46,11 +47,14 @@ function setTab(tab) {
   currentTab = tab;
   document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach(panel => { panel.hidden = panel.id !== 'tab-' + tab; });
-  if (tab === 'backups') loadBackups().catch(error => toast(I18n.error(error), true));
+  if (tab === 'backups') { loadBackups().catch(error => toast(I18n.error(error), true)); loadCharacters().catch(error => toast(I18n.error(error), true)); }
+  if (tab === 'settings') loadCharacters().catch(error => toast(I18n.error(error), true));
   if (tab === 'logs') loadLogs().catch(error => toast(I18n.error(error), true));
 }
 function selectWorld(id) {
   selected = id;
+  playerWorld = null; characterWorld = null; playerRows = []; characterRows = []; playerPollAt = 0;
+  renderCharacters();
   localStorage.setItem('pera-world', id);
   render();
   fillSettings();
@@ -70,6 +74,10 @@ function render() {
   $('#world-description').textContent = item?.description || t('Build a camp. Bring your friends. Keep the fire going.');
   $('#breadcrumb-world').textContent = item?.name || t('Overview');
   const runtime = item?.runtime;
+  $('#native-rollback').disabled = Boolean(state.busy) || runtime?.state !== 'running';
+  $('#rollback-count').max = item?.snapshots || 50;
+  $('#recover-character').disabled = Boolean(state.busy) || !item || ['running','degraded'].includes(runtime?.state);
+  $('#refresh-characters').disabled = Boolean(state.busy);
   $('#metric-status').textContent = runtime ? t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[runtime.state]) : t('No world yet');
   $('#metric-status').classList.toggle('green', runtime?.state === 'running');
   $('#metric-status-note').textContent = runtime?.uptime_seconds ? t('Up {duration} · {memory} MB game memory', {duration: duration(runtime.uptime_seconds), memory: runtime.memory_mb}) : t(item ? 'Ready when you are' : 'Create a world to begin');
@@ -103,6 +111,7 @@ async function refresh() {
   polling = true;
   try {
     const first = !state;
+    const previousSelected = selected;
     state = await api('/status');
     $('#connection-error').hidden = true;
     if (!world()) selected = state.worlds.find(w => w.id === localStorage.getItem('pera-world'))?.id || state.worlds[0]?.id || null;
@@ -112,14 +121,19 @@ async function refresh() {
         if (!first) {
           toast(I18n.message(job.error_i18n) || job.error || job.result?.message_i18n || job.result?.message || msg('{job} completed.', {job: msg(job.title)}), job.state === 'failed');
           if (job.result?.world_id) selected = job.result.world_id;
-          if (['Create world','Roll back world','Import local save'].includes(job.title)) { fillSettings(); mods = structuredClone(world()?.mods || []); renderMods(); }
-          if (currentTab === 'backups') await loadBackups();
+          if (['Create world','Roll back world','Restore backup','Import local save'].includes(job.title)) { fillSettings(); mods = structuredClone(world()?.mods || []); renderMods(); playerPollAt = 0; }
+          if (currentTab === 'backups') { await loadBackups(); await loadCharacters(); }
         }
       }
     }
+    const changedWorld = previousSelected !== selected;
+    if (changedWorld) { playerWorld = null; characterWorld = null; playerRows = []; characterRows = []; playerPollAt = 0; renderCharacters(); }
     render();
-    if (first) { fillSettings(); mods = structuredClone(world()?.mods || []); renderMods(); }
+    if (first || changedWorld) { fillSettings(); mods = structuredClone(world()?.mods || []); renderMods(); }
+    if (changedWorld && currentTab === 'settings') await loadCharacters();
+    if (changedWorld && currentTab === 'backups') { await loadBackups(); await loadCharacters(); }
     if (currentTab === 'logs' && selected) await loadLogs();
+    if (selected) await loadPlayers();
   } catch (error) {
     $('#connection-error').textContent = t('Connection interrupted: {error}', {error: msg(I18n.error(error))});
     $('#connection-error').hidden = false;
@@ -132,8 +146,9 @@ function fillSettings() {
   const check = (key, title) => `<label data-i18n class="checkbox"><input type="checkbox" name="${key}" ${w[key] ? 'checked' : ''}>${title}</label>`;
   const json = (key, title) => `<label data-i18n>${title}<textarea class="code-input" name="${key}" rows="5">${escapeHTML(JSON.stringify(w[key], null, 2))}</textarea></label>`;
   const ids = (key, title) => `<label data-i18n>${title}<textarea name="${key}" rows="3" data-i18n-placeholder placeholder="KU_abcdefgh, one per line">${escapeHTML(w[key].join('\n'))}</textarea></label>`;
-  $('#settings-form').innerHTML = `<div class="form-grid">${input('name','World name')}${input('description','Description')}${input('password','Join password','password')}<label data-i18n>Klei cluster token<input name="token" type="password" autocomplete="off" data-i18n-placeholder placeholder="${w.has_token ? 'Token saved · leave blank to keep' : 'Paste your Klei token'}"></label><label data-i18n>Game mode<select name="game_mode">${['survival','endless','wilderness'].map(mode => `<option data-i18n value="${mode}" ${mode === w.game_mode ? 'selected' : ''}>${mode}</option>`).join('')}</select></label><label data-i18n>Player slots<input type="number" min="1" max="64" name="max_players" value="${w.max_players}"></label></div><div class="checks">${check('caves','Include caves')}${check('pause_when_empty','Pause when empty')}${check('pvp','Allow PvP')}${check('autostart','Start this world at boot')}</div><details><summary data-i18n>World generation & in-game snapshots</summary><p data-i18n class="field-help">Overrides are JSON objects, for example {"season_start":"autumn","world_size":"default"}. Existing terrain will not regenerate. For a fresh layout, create a new world.</p><div class="form-grid">${json('master_overrides','Surface overrides')}${json('caves_overrides','Caves overrides')}<label data-i18n>In-game save snapshots<input type="number" name="snapshots" min="1" max="50" value="${w.snapshots}"></label></div></details><details><summary data-i18n>Player permissions</summary><p data-i18n class="field-help">Use Klei user IDs, one per line. Admins can use the in-game console. Whitelisted players can bypass the join password; this is not an exclusive allowlist.</p><div class="form-grid">${ids('admins','Administrators (OP)')}${ids('banned','Banned players')}${ids('whitelist','Whitelisted players')}</div></details><div class="form-actions"><button data-i18n type="submit" class="button primary">Save settings</button><span data-i18n class="muted">Changes take effect on the next start.</span></div>`;
+  $('#settings-form').innerHTML = `<div class="form-grid">${input('name','World name')}${input('description','Description')}${input('password','Join password','password')}<label data-i18n>Klei cluster token<input name="token" type="password" autocomplete="off" data-i18n-placeholder placeholder="${w.has_token ? 'Token saved · leave blank to keep' : 'Paste your Klei token'}"></label><label data-i18n>Game mode<select name="game_mode">${['survival','endless','wilderness'].map(mode => `<option data-i18n value="${mode}" ${mode === w.game_mode ? 'selected' : ''}>${mode}</option>`).join('')}</select></label><label data-i18n>Player slots<input type="number" min="1" max="64" name="max_players" value="${w.max_players}"></label></div><div class="checks">${check('caves','Include caves')}${check('pause_when_empty','Pause when empty')}${check('pvp','Allow PvP')}${check('autostart','Start this world at boot')}</div><details><summary data-i18n>World generation & in-game snapshots</summary><p data-i18n class="field-help">Overrides are JSON objects, for example {"season_start":"autumn","world_size":"default"}. Existing terrain will not regenerate. For a fresh layout, create a new world.</p><div class="form-grid">${json('master_overrides','Surface overrides')}${json('caves_overrides','Caves overrides')}<label data-i18n>In-game save snapshots<input type="number" name="snapshots" min="1" max="50" value="${w.snapshots}"></label></div></details><details><summary data-i18n>Player permissions</summary><p data-i18n class="field-help">Use Klei user IDs, one per line. Admins can use the in-game console. Whitelisted players can bypass the join password; this is not an exclusive allowlist.</p><div id="player-candidates"></div><p class="field-help" data-i18n>Choose a candidate to add an ID below, then save settings. Names and imported IDs are hints; verify the account before granting permissions. New joins appear automatically.</p><div class="form-grid">${ids('admins','Administrators (OP)')}${ids('banned','Banned players')}${ids('whitelist','Whitelisted players')}</div></details><div class="form-actions"><button data-i18n type="submit" class="button primary">Save settings</button><span data-i18n class="muted">Changes take effect on the next start.</span></div>`;
   I18n.bind($('#settings-form'));
+  renderPlayers();
 }
 function collectSettings(form) {
   const values = Object.fromEntries(new FormData(form));
@@ -158,12 +173,52 @@ function renderMods() {
   $('#mods-list').innerHTML = mods.map((mod, index) => `<article class="mod-row" data-index="${index}"><div class="mod-heading"><label class="checkbox"><input type="checkbox" ${mod.enabled ? 'checked' : ''}>${h('Workshop {id}', {id: mod.id})}</label><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.id}" target="_blank" rel="noreferrer" data-i18n>View ↗</a><button class="icon-button remove-mod" data-index="${index}" aria-label="Remove mod ${mod.id}" data-i18n-aria-label="${escapeHTML(JSON.stringify(msg('Remove mod {id}', {id: mod.id})))}">×</button></div><label data-i18n>Configuration options (JSON)<textarea class="code-input" rows="3">${escapeHTML(JSON.stringify(mod.options,null,2))}</textarea></label></article>`).join('') || '<div data-i18n class="quiet-empty">A world in its original form. Add your first mod below.</div>';
   I18n.bind($('#mods-list'));
 }
+function renderPlayers() {
+  const rows = playerWorld === selected ? playerRows : [];
+  const candidates = $('#player-candidates');
+  if (candidates) {
+    candidates.innerHTML = rows.map(player => `<div class="player-candidate"><div><strong>${escapeHTML(player.name || player.userid)}</strong><small>${escapeHTML(player.userid)} · ${escapeHTML(t(player.sources.includes('join') || player.sources.includes('console') ? 'Seen by this server' : player.sources.includes('save') ? 'Saved player' : player.sources.includes('imported_log') ? 'Imported log' : player.sources.includes('cached_owner') ? 'Cached owner · character unverified' : 'Permission list'))}</small></div><div class="player-permission-actions">${[['admins','Add admin'],['banned','Add ban'],['whitelist','Add whitelist']].map(([key,label]) => `<button type="button" class="button" data-player-id="${escapeHTML(player.userid)}" data-permission="${key}">${h(label)}</button>`).join('')}</div></div>`).join('') || `<p class="muted">${h('No known Klei IDs yet. Import a save or wait for a player to join.')}</p>`;
+    const unknown = characterWorld === selected ? characterRows.filter(c => !rows.some(p => p.userid === c.userid || p.folders?.[c.shard] === c.folder)) : [];
+    candidates.innerHTML += unknown.map(c => `<div class="player-candidate"><div><strong>${escapeHTML(c.character || c.folder)}</strong><small>${escapeHTML(c.folder)} · ${h('Identity not linked')} · ${escapeHTML(t(c.shard === 'Master' ? 'Surface' : 'Caves'))}</small></div><button type="button" class="button" data-match-character="${escapeHTML(c.path)}">${h('Link a saved character')}</button></div>`).join('');
+    I18n.bind(candidates);
+  }
+  const account = $('#character-account'), previous = account.value;
+  account.innerHTML = `<option value="" data-i18n>Choose an online account</option>` + rows.filter(p => p.sources.includes('console') && Object.keys(p.folders || {}).length).map(p => `<option value="${escapeHTML(p.userid)}">${escapeHTML(p.name ? p.name + ' · ' + p.userid : p.userid)}</option>`).join('');
+  if ([...account.options].some(option => option.value === previous)) account.value = previous;
+  I18n.bind(account);
+}
+async function loadPlayers(force = false) {
+  if (!selected || playerPolling || (!force && playerWorld === selected && Date.now() - playerPollAt < 5000)) return;
+  playerPolling = true;
+  const id = selected;
+  try {
+    const result = await api('/worlds/' + id + '/players');
+    if (id !== selected) return;
+    playerWorld = id; playerRows = result.players; playerPollAt = Date.now(); renderPlayers();
+  } finally { playerPolling = false; }
+}
+async function loadCharacters() {
+  if (!selected || state?.busy) return;
+  const id = selected;
+  const result = await api('/worlds/' + id + '/characters');
+  if (id !== selected) return;
+  characterWorld = id; characterRows = result.characters;
+  renderCharacters();
+  await loadPlayers(true);
+}
+function renderCharacters() {
+  const select = $('#character-source'), previous = select.value;
+  select.innerHTML = `<option value="" data-i18n>Choose a saved character</option>` + characterRows.map(c => `<option value="${escapeHTML(c.path)}">${escapeHTML(t(c.shard === 'Master' ? 'Surface' : 'Caves') + ' · ' + (c.character || c.folder) + ' · ' + c.folder + ' / ' + c.snapshot + ' · ' + c.session)}</option>`).join('');
+  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  I18n.bind(select);
+  I18n.text('#character-info', characterRows.length ? 'Encoded or offline folder names are not Klei IDs. Select the original character carefully; the cached owner is not assigned automatically.' : 'No character snapshots found. Include the complete shard save folders in your ZIP.');
+}
 async function loadBackups() {
   if (!selected) return;
   const id = selected;
   const {backups} = await api('/worlds/' + id + '/backups');
   if (id !== selected) return;
-  $('#backup-list').innerHTML = backups.length ? `<div class="table-wrap"><table><thead><tr><th data-i18n>BACKUP</th><th data-i18n>CREATED</th><th data-i18n>SIZE</th><th></th></tr></thead><tbody>${backups.map(backup => `<tr><td><strong>${escapeHTML(backup.label_i18n ? t(backup.label_i18n) : backup.label)}</strong><small>${backup.id}</small></td><td>${date(backup.created_at)}</td><td>${backup.size_mb} MB</td><td class="table-actions"><button class="button restore-backup" data-snapshot="${backup.id}" data-i18n>Roll back</button><button class="icon-button delete-backup" data-snapshot="${backup.id}" data-i18n-aria-label aria-label="Delete backup">×</button></td></tr>`).join('')}</tbody></table></div>` : '<div data-i18n class="quiet-empty">No backups yet. Save a moment you can come back to.</div>';
+  $('#backup-list').innerHTML = backups.length ? `<div class="table-wrap"><table><thead><tr><th data-i18n>BACKUP</th><th data-i18n>CREATED</th><th data-i18n>SIZE</th><th></th></tr></thead><tbody>${backups.map(backup => `<tr><td><strong>${escapeHTML(backup.label_i18n ? t(backup.label_i18n) : backup.label)}</strong><small>${backup.id}</small></td><td>${date(backup.created_at)}</td><td>${backup.size_mb} MB</td><td class="table-actions"><button class="button restore-backup" data-snapshot="${backup.id}" data-i18n>Restore backup</button><button class="icon-button delete-backup" data-snapshot="${backup.id}" data-i18n-aria-label aria-label="Delete backup">×</button></td></tr>`).join('')}</tbody></table></div>` : '<div data-i18n class="quiet-empty">No backups yet. Save a moment you can come back to.</div>';
   I18n.bind($('#backup-list'));
 }
 async function loadLogs() {
@@ -203,8 +258,27 @@ document.addEventListener('click', async event => {
     }
     if (target.id === 'announce-button') { const url = worldURL(); confirmAction('A word for your survivors', 'Send an in-game announcement to the world.', 'Message', '', message => queued(url + '/actions/announce','POST',{message})); }
     if (target.id === 'delete-world') { const url = worldURL(); confirmAction('Archive this world?', msg('Stop the world first. Type “{name}” to confirm. World files and a backup are kept on disk.', {name: world().name}), 'World name', '', confirmation => queued(url,'DELETE',{confirmation})); }
-    if (target.matches('.restore-backup')) { const url = worldURL(); confirmAction('Roll back this world?', msg('This replaces world progress and disconnects players. A safety backup is made first. Type “{name}” to continue.', {name: world().name}), 'World name', '', confirmation => queued(url + '/backups/' + target.dataset.snapshot + '/restore','POST',{confirmation})); }
+    if (target.matches('.restore-backup')) { const url = worldURL(); confirmAction('Restore this backup?', msg('This replaces world progress and disconnects players. A safety backup is made first. Type “{name}” to continue.', {name: world().name}), 'World name', '', confirmation => queued(url + '/backups/' + target.dataset.snapshot + '/restore','POST',{confirmation})); }
     if (target.matches('.delete-backup')) { const url = worldURL(); confirmAction('Delete this backup?', 'This backup will be permanently removed.', '', '', () => queued(url + '/backups/' + target.dataset.snapshot,'DELETE',{})); }
+    if (target.dataset.permission) {
+      const input = $('#settings-form').elements.namedItem(target.dataset.permission);
+      const ids = input.value.split(/\s+/).filter(Boolean);
+      if (!ids.includes(target.dataset.playerId)) ids.push(target.dataset.playerId);
+      input.value = ids.join('\n');
+      toast('ID added to the form. Save settings to apply it.');
+    }
+    if (target.dataset.matchCharacter) { setTab('backups'); $('#character-source').value = target.dataset.matchCharacter; $('#character-source').focus(); }
+    if (target.id === 'refresh-characters') await loadCharacters();
+    if (target.id === 'recover-character') {
+      const url = worldURL(), source = $('#character-source').value, userid = $('#character-account').value;
+      if (!source || !userid) throw new I18n.Error('Select an original character and an online destination account.');
+      confirmAction('Recover this character?', msg('Replace character files for {userid} using {source}? A safety backup is made first. Type “{name}” to continue.', {userid,source,name:world().name}), 'World name', '', confirmation => queued(url + '/recover-character','POST',{source,userid,confirmation}));
+    }
+    if (target.id === 'native-rollback') {
+      const url = worldURL(), count = Number($('#rollback-count').value);
+      if (!Number.isInteger(count) || count < 1 || count > world().snapshots) throw new I18n.Error('Choose a rollback count between 1 and {maximum}.', {maximum:world().snapshots});
+      confirmAction('Request native rollback?', msg('Request {count} game snapshots back. Unsaved progress will be lost. DST reloads the world. Type “{name}” to continue.', {count,name:world().name}), 'World name', '', confirmation => queued(url + '/actions/rollback','POST',{count,confirmation}));
+    }
     if (target.id === 'add-mod') {
       captureMods();
       const id = $('#new-mod-id').value.trim();
@@ -288,7 +362,7 @@ $('#import-form').addEventListener('submit', async event => {
   }
 });
 document.addEventListener('languagechange', () => {
-  render();
+  render(); renderPlayers(); renderCharacters();
   if (currentTab === 'backups') loadBackups().catch(error => toast(I18n.error(error), true));
 });
 refresh();
