@@ -1,0 +1,33 @@
+[Unit]
+Description=Pera Panel - Don’t Starve Together control panel
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=pera-panel
+Group=pera-panel
+WorkingDirectory=/opt/pera-panel/current
+Environment=HOME=/var/lib/pera-panel
+Environment=PERA_CONFIG=/etc/pera-panel/config.json
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/pera-panel/current/.venv/bin/python -m pera_panel serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=180
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pera-panel /opt/pera-panel/game /opt/pera-panel/steamcmd
+RestrictSUIDSGID=true
+LockPersonality=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

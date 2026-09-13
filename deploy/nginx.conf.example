@@ -1,0 +1,24 @@
+# Replace panel.example.com and use your TLS certificate paths.
+# Set secure_cookie=true in /etc/pera-panel/config.json after enabling HTTPS,
+# then sudo pera-panel restart. Keep Pera bound to 127.0.0.1.
+server {
+    listen 80;
+    server_name panel.example.com;
+    return 301 https://$host$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name panel.example.com;
+    ssl_certificate /etc/letsencrypt/live/panel.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/panel.example.com/privkey.pem;
+    # 256 MiB save ZIP plus its multipart envelope. Other API requests are limited by Flask.
+    client_max_body_size 257m;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        # The app does not trust forwarded client IPs; login limits are shared behind this proxy.
+        proxy_read_timeout 30s;
+        client_body_timeout 120s;
+    }
+}
