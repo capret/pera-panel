@@ -229,7 +229,7 @@ Backups are local directories containing the cluster’s saved games, configurat
 
 Before a restore, the current world is backed up as **Before rollback**. Both shards are restored together; current Klei credentials and boot preference are retained. If a graceful shutdown times out, backup/restore aborts instead of copying a live save. A filesystem error during restore attempts to put the original world directory back. Unexpected power loss during a rename may leave `.restore-*` or `.previous-*` directories for manual recovery; do not delete them without inspection.
 
-Archive world removes it from the UI and keeps its files under `deleted/`, plus a safety backup. To unarchive manually, stop the panel and move the archived directory back to `clusters/<original-12-character-id>`; then start the panel. There is no archive browser in this first version.
+Archive world removes it from the UI and keeps its files under `deleted/`, plus a safety backup. To unarchive manually, stop the panel and move the archived directory back to `clusters/<original-12-character-id>`; then start the panel. Open **Archived worlds / 已归档世界** in the sidebar to view existing archives, including those made by older versions. **Delete permanently / 永久删除** removes all archived copies for that world ID, its panel backups, and its logs. The dialog shows the deletion scope and requires the exact world name. This action cannot be undone and creates no extra backup. Other worlds and the shared game/mod installation are kept. Worlds still present in the dashboard must be archived first; linked paths are refused. The archive list remains accessible when no active worlds remain.
 
 | Server path | Contents |
 | --- | --- |

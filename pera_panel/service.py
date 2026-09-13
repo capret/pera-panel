@@ -12,6 +12,7 @@ import tempfile
 import uuid
 
 from .runtime import Runtime
+from .archives import Archives
 from .players import PlayerRegistry, USER_ID
 from .save_import import stage_save
 from .storage import PanelError, Store, line, validate_world, write_json
@@ -21,6 +22,7 @@ class Service:
     def __init__(self, root, game, runtime_factory=Runtime):
         self.store = Store(root, game)
         self.players = PlayerRegistry(self.store)
+        self.archives = Archives(self.store)
         self.runtime = runtime_factory(self.store)
         self.runtime.players = self.players
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pera-operations")
@@ -311,6 +313,10 @@ class Service:
         archive.mkdir(exist_ok=True)
         self.store.world_path(identifier).rename(archive / f"{identifier}-{uuid.uuid4().hex[:8]}")
         return {"backup_id": safety, "message": "World archived under the data/deleted directory."}
+
+    def delete_archived(self, identifier, confirmation):
+        self.require_stopped(identifier)
+        return self.archives.delete(identifier, confirmation)
 
     def autostart(self):
         resume_file = self.store.root / "resume.json"

@@ -146,6 +146,18 @@ def create_app(config, service=None):
         data = body()
         return operation("Create world", lambda: service.create(data))
 
+    @app.get("/api/archived-worlds")
+    def archived_worlds():
+        with service.lock:
+            if service.busy:
+                raise PanelError("Another operation is in progress. Wait for it to finish.", 409)
+            return jsonify(worlds=service.archives.list())
+
+    @app.delete("/api/archived-worlds/<identifier>")
+    def delete_archived_world(identifier):
+        data = body()
+        return operation("Delete archived world", lambda: service.delete_archived(identifier, data.get("confirmation")))
+
     @app.patch("/api/worlds/<identifier>")
     def configure_world(identifier):
         data = body()

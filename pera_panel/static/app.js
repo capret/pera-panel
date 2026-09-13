@@ -5,6 +5,7 @@ const {t, descriptor: msg} = I18n;
 const h = (key, params = {}) => `<span data-i18n-message="${escapeHTML(JSON.stringify(msg(key, params)))}">${escapeHTML(t(key, params))}</span>`;
 let state = null, selected = null, currentTab = 'overview', mods = [], confirmCallback = null, polling = false;
 let importTarget = null, uploading = false;
+let archivedWorlds = [], archivesLoading = false;
 let playerWorld = null, playerRows = [], characterRows = [], characterWorld = null, playerPolling = false, playerPollAt = 0;
 const seenJobs = new Set();
 const csrf = $('meta[name="csrf-token"]').content;
@@ -65,6 +66,7 @@ function selectWorld(id) {
 function render() {
   if (!state) return;
   const item = world();
+  renderArchives();
   $('#install-notice').hidden = state.game_installed;
   $('#empty-state').hidden = state.worlds.length > 0;
   $('#world-content').hidden = !item;
@@ -123,6 +125,7 @@ async function refresh() {
           if (job.result?.world_id) selected = job.result.world_id;
           if (['Create world','Roll back world','Restore backup','Import local save'].includes(job.title)) { fillSettings(); mods = structuredClone(world()?.mods || []); renderMods(); playerPollAt = 0; }
           if (currentTab === 'backups') { await loadBackups(); await loadCharacters(); }
+          if ($('#archives-dialog').open && !state.busy) await loadArchives();
         }
       }
     }
@@ -138,6 +141,23 @@ async function refresh() {
     $('#connection-error').textContent = t('Connection interrupted: {error}', {error: msg(I18n.error(error))});
     $('#connection-error').hidden = false;
   } finally { polling = false; }
+}
+function renderArchives() {
+  const list = $('#archive-list');
+  $('#refresh-archives').disabled = archivesLoading || Boolean(state?.busy);
+  if (archivesLoading) { list.innerHTML = `<p class="quiet-empty">${h('Loading archived worlds…')}</p>`; }
+  else if (!archivedWorlds.length) { list.innerHTML = `<p class="quiet-empty">${h('No archived worlds.')}</p>`; }
+  else {
+    list.innerHTML = archivedWorlds.map(w => `<div class="archive-row"><div><strong>${escapeHTML(w.name)}</strong><small>${escapeHTML(w.id)}</small><p>${h('Archived copies: {copies} · Backups: {backups} · {size} MiB including logs', {copies:w.copies,backups:w.backup_count,size:w.size_mb})}</p></div><button class="button danger" data-delete-archive="${escapeHTML(w.id)}" ${state?.busy ? 'disabled' : ''}>${h('Delete permanently')}</button></div>`).join('');
+  }
+  I18n.bind(list);
+}
+async function loadArchives() {
+  if (archivesLoading) return;
+  archivesLoading = true;
+  renderArchives();
+  try { archivedWorlds = (await api('/archived-worlds')).worlds; }
+  finally { archivesLoading = false; renderArchives(); }
 }
 function fillSettings() {
   const w = world();
@@ -246,6 +266,13 @@ document.addEventListener('click', async event => {
     if (target.matches('[data-world]')) selectWorld(target.dataset.world);
     if (target.matches('[data-tab]')) setTab(target.dataset.tab);
     if (['sidebar-create','add-world','empty-create'].includes(target.id)) $('#create-dialog').showModal();
+    if (target.id === 'open-archives') { $('#archives-dialog').showModal(); await loadArchives(); }
+    if (target.id === 'refresh-archives') await loadArchives();
+    if (target.dataset.deleteArchive) {
+      const archived = archivedWorlds.find(w => w.id === target.dataset.deleteArchive);
+      if (!archived) return;
+      confirmAction('Permanently delete this archived world?', msg('Delete “{name}” ({id}), including all {copies} archived copies, {backups} backups, and its logs? This cannot be undone and no new backup will be made. Type “{name}” to confirm.', {name:archived.name,id:archived.id,copies:archived.copies,backups:archived.backup_count}), 'World name', '', confirmation => queued('/archived-worlds/' + archived.id, 'DELETE', {confirmation}));
+    }
     if (target.id === 'open-import') {
       importTarget = {id: world().id, name: world().name};
       $('#import-form').reset();

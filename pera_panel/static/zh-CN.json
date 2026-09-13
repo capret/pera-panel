@@ -434,5 +434,22 @@
   "Select an original character and a destination save.": "请选择原角色和目标存档。",
   "Copy {source} into {destination}, replacing its character files? A safety backup is made first. Type “{name}” to continue.": "将 {source} 复制到 {destination} 并替换其中的角色文件？操作前会创建安全备份。请输入“{name}”继续。",
   "Choose an existing destination character save. Refresh the page to use folder selection.": "请选择已有的目标角色存档。请刷新页面以使用文件夹选择功能。",
-  "Source and destination must belong to the same shard and world session.": "原存档和目标存档必须属于同一分片、同一世界会话。"
+  "Source and destination must belong to the same shard and world session.": "原存档和目标存档必须属于同一分片、同一世界会话。",
+  "Archived worlds": "已归档世界",
+  "Archived worlds keep their files on this server. Permanent deletion removes their saves, backups, and logs to free disk space.": "已归档世界的文件仍保存在此服务器上。永久删除会移除其存档、备份和日志，以释放磁盘空间。",
+  "Refresh archived worlds": "刷新归档列表",
+  "Loading archived worlds…": "正在加载已归档世界…",
+  "No archived worlds.": "暂无已归档世界。",
+  "Delete permanently": "永久删除",
+  "Permanently delete this archived world?": "永久删除此归档世界？",
+  "Delete “{name}” ({id}), including all {copies} archived copies, {backups} backups, and its logs? This cannot be undone and no new backup will be made. Type “{name}” to confirm.": "删除“{name}”（{id}），包括全部 {copies} 份归档、{backups} 份备份及其日志？此操作无法撤销，也不会创建新备份。请输入“{name}”以确认。",
+  "Delete archived world": "删除归档世界",
+  "Archived data must stay inside the panel data directory.": "归档数据必须位于面板的数据目录内。",
+  "Linked archived files, backups, or logs cannot be deleted.": "归档、备份或日志中包含链接，无法删除。",
+  "Expected an archived data directory.": "归档数据路径必须是目录。",
+  "Archived world not found.": "未找到此归档世界。",
+  "This world is still in your dashboard. Archive it before deleting its data.": "此世界仍在面板中，请先归档再删除其数据。",
+  "Type the archived world name exactly to permanently delete it.": "请准确输入归档世界的名称以永久删除。",
+  "Archived world, backups, and logs permanently deleted.": "归档世界、备份和日志已永久删除。",
+  "Archived copies: {copies} · Backups: {backups} · {size} MiB including logs": "{copies} 份归档 · {backups} 份备份 · 含日志共 {size} MiB"
 }
