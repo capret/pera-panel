@@ -42,7 +42,7 @@ The repository URL and branch/tag are saved for future updates. Only public HTTP
 The familiar single-command form is also supported:
 
 ```bash
-sudo bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/capret/pera-panel/main/install.sh) install --repo https://github.com/YOUR_NAME/pera-panel.git --ref main'
+sudo bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/capret/pera-panel/main/install.sh) install --repo https://github.com/capret/pera-panel.git --ref main'
 ```
 
 Only execute installer code from a repository you trust. This installer requires root for package installation and service setup; the web app and game run as `pera-panel`.
