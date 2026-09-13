@@ -84,26 +84,26 @@ Public binding uses HTTP until you configure a TLS reverse proxy; use HTTPS or t
 
 Automatic setup installs UFW if needed, adds the panel/game rules and detected/configured SSH ports, then enables UFW. Existing rules and default policies are retained; no firewall reset is performed. Enabling an inactive UFW applies its existing policies to other services too, so use `--firewall manual` on a host whose firewall you manage yourself. Loopback panel binds do not add a public panel rule. Port changes add the new rule without deleting older rules, which may serve other applications.
 
-**Cloud provider rules are separate.** For Tencent Cloud, add these inbound rules in the instance’s security group or Lighthouse firewall. The installer cannot change cloud rules without your provider account/API access. No inbound panel port is needed when using the SSH tunnel.
+**Cloud provider rules are separate.** For Tencent Cloud, allow UDP **10999–11000** for players and TCP **8080** (or your chosen panel port) in the instance’s security group or Lighthouse firewall. Keep your SSH access rule. The installer cannot change cloud rules without your provider account/API access. No inbound panel port is needed when using the SSH tunnel.
 
 | Purpose | Ports | Exposure |
 | --- | --- | --- |
 | Surface / caves | UDP 10999 / 11000 | Player access |
-| Steam authentication | UDP 8766 / 8767 | Steam networking |
-| Steam master server | UDP 27016 / 27017 | Steam networking |
 | Shard connection | UDP 10888 | Loopback only; keep private |
 | Web panel | TCP 8080 (or your selected port) | All IPv4 interfaces by default |
+
+For this surface/caves setup, normal player connections use only UDP 10999 and 11000. Klei’s [command-line guide](https://support.klei.com/hc/en-us/articles/360029556192-Dedicated-Server-Command-Line-Options-Guide) identifies `server_port` as the UDP connection port and describes the Steam authentication/master ports as internal Steam ports. We retain distinct Steam ports (8766/8767 and 27016/27017) in the generated configuration, but do not add public inbound firewall rules for them. Port 10888 connects shards on this same machine and stays on loopback.
 
 When using manual firewall mode, these are the default application rules:
 
 ```bash
 sudo ufw allow 8080/tcp
 sudo ufw allow 10999:11000/udp
-sudo ufw allow 8766:8767/udp
-sudo ufw allow 27016:27017/udp
 ```
 
 Allow the actual SSH port before manually enabling a firewall. Outbound access to Steam, Steam Workshop, and Klei must also work. The installer does not configure provider firewalls, NAT, or port forwarding.
+
+Earlier installer versions added inbound UDP rules for 8766–8767 and 27016–27017. Updating the script does not delete existing host or cloud firewall rules. If you already installed those rules, review and remove them manually if they are not used by another service.
 
 ## Maintenance
 

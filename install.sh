@@ -229,7 +229,9 @@ configure_firewall() {
         ufw allow "$port/tcp" comment 'SSH preserved by Pera Panel'
     done <<< "$ssh_rules"
     if [[ "$BIND" != 127.* ]]; then ufw allow "$PORT/tcp" comment 'Pera Panel'; fi
-    for port in 10999:11000 8766:8767 27016:27017; do ufw allow "$port/udp" comment 'DST Pera Panel'; done
+    # Public player connections use the two NETWORK/server_port values. Steam's
+    # internal authentication/master ports do not need blanket inbound rules.
+    ufw allow 10999:11000/udp comment 'DST Pera Panel'
     # Keep existing rules/policies. Add SSH exceptions BEFORE activating the firewall.
     ufw --force enable
     ufw status

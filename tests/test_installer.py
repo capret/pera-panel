@@ -63,9 +63,11 @@ ufw() { printf 'ufw %s\n' "$*"; }
 configure_firewall
 ''')
     assert "ufw allow 18080/tcp" in output
-    for port in ("22/tcp", "2200/tcp", "2222/tcp", "10999:11000/udp", "8766:8767/udp", "27016:27017/udp"):
+    for port in ("22/tcp", "2200/tcp", "2222/tcp", "10999:11000/udp"):
         assert output.index("ufw allow " + port) < output.index("ufw --force enable")
     assert "ufw reset" not in output and "10888" not in output
+    udp_rules = [line for line in output.splitlines() if line.startswith("ufw allow ") and "/udp" in line]
+    assert udp_rules == ["ufw allow 10999:11000/udp comment DST Pera Panel"]
 
 
 def test_manual_firewall_and_ordinary_updates_do_not_modify_rules():
