@@ -34,11 +34,9 @@ Keep the uploaded source directory: panel updates reuse it. Upload changed code 
 
 ## Install from your GitHub repository
 
-Push these project files to your repository first. Replace `YOUR_NAME` and `main` below with your actual owner and branch:
-
 ```bash
-curl -fL https://raw.githubusercontent.com/YOUR_NAME/pera-panel/main/install.sh -o install.sh
-sudo bash install.sh install --repo https://github.com/YOUR_NAME/pera-panel.git --ref main
+curl -fL https://raw.githubusercontent.com/capret/pera-panel/main/install.sh -o install.sh
+sudo bash install.sh install --repo https://github.com/capret/pera-panel.git --ref main
 ```
 
 The repository URL and branch/tag are saved for future updates. Only public HTTPS GitHub repositories are supported by the remote installer. For a private repository, clone it yourself on the server and use `--source /absolute/path/to/checkout`.
@@ -46,7 +44,7 @@ The repository URL and branch/tag are saved for future updates. Only public HTTP
 The familiar single-command form is also supported:
 
 ```bash
-sudo bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_NAME/pera-panel/main/install.sh) install --repo https://github.com/YOUR_NAME/pera-panel.git --ref main'
+sudo bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/capret/pera-panel/main/install.sh) install --repo https://github.com/YOUR_NAME/pera-panel.git --ref main'
 ```
 
 Only execute installer code from a repository you trust. This installer requires root for package installation and service setup; the web app and game run as `pera-panel`.
