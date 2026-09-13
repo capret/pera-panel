@@ -19,7 +19,22 @@ def clean(value, limit=100):
     return "".join(c for c in value if ord(c) >= 32)[:limit] if isinstance(value, str) else ""
 
 
-def characters(root):
+def folder_userid(folder, known_ids=()):
+    """A raw save path can append '_'; never trim an authenticated account ID."""
+    if not USER_ID.fullmatch(folder):
+        return None
+    candidates = {folder}
+    if folder.endswith("_") and USER_ID.fullmatch(folder[:-1]):
+        candidates.add(folder[:-1])
+    matched = candidates.intersection(known_ids)
+    if len(matched) == 1:
+        return matched.pop()
+    if len(matched) > 1 or folder.endswith("_"):
+        return None  # Ambiguous suffixes need an account hint, not a guessed identity.
+    return folder
+
+
+def characters(root, known_ids=()):
     """Inspect the fixed session directory depth; never follow links or read game payloads."""
     found = []
     budget = 20000
@@ -53,14 +68,14 @@ def characters(root):
                 meta = latest.with_suffix(".meta")
                 if meta.is_file() and not meta.is_symlink() and meta.stat().st_size <= 8192:
                     try:
-                        text = meta.read_text(encoding="utf-8-sig")
+                        text = meta.read_text(encoding="utf-8-sig").rstrip("\0")
                         text = re.sub(r"^KLEI\s+1\s*", "", text)
                         prefab = clean(LiteralTable(text).read().get("character"), 60)
                     except (PanelError, UnicodeError, ValueError, RecursionError):
                         pass  # Metadata is optional; compressed/unknown formats remain untouched.
                 found.append({"path": folder.relative_to(root).as_posix(), "shard": shard,
                               "session": session.name, "folder": folder.name, "character": prefab,
-                              "snapshot": latest.name, "userid": folder.name if USER_ID.fullmatch(folder.name) else None,
+                              "snapshot": latest.name, "userid": folder_userid(folder.name, known_ids),
                               "offline": folder.name.startswith("OU_")})
     return sorted(found, key=lambda p: p["path"])
 
@@ -130,10 +145,6 @@ class PlayerRegistry:
         """Run on import and explicit refresh, not on every status poll."""
         root = self.store.world_path(identifier)
         rows = []
-        for character in characters(root):
-            if character["userid"]:
-                rows.append({"userid": character["userid"], "source": "save", "folder": character["folder"],
-                             "shard": character["shard"]})
         for shard in ("Master", "Caves"):
             path = root / shard / "save" / "cached_userid"
             if path.is_file() and not any(p.is_symlink() for p in (root / shard, path.parent, path)) \
@@ -144,7 +155,37 @@ class PlayerRegistry:
                     rows.append({"userid": owner, "source": "cached_owner"})
                 except UnicodeError:
                     pass
-        self.record_many(identifier, rows)
+        with self.lock:
+            data = self._read(root)
+            world = self.store.get(identifier)
+            known = {p["userid"] for p in data.values() if set(p["sources"]) - {"save"}}
+            known.update(row["userid"] for row in rows if USER_ID.fullmatch(row["userid"]))
+            known.update(userid for key in ("admins", "banned", "whitelist") for userid in world[key])
+            saved = characters(root, known)
+            # Drop stale save-only discoveries, including the old literal KU_..._ records.
+            # Authenticated IDs and administrator-configured permissions are never normalized.
+            valid = {c["userid"] for c in saved if c["userid"]}
+            for userid in list(data):
+                player = data[userid]
+                if "save" in player["sources"] and userid not in valid:
+                    player["sources"].remove("save")
+                    if not player["sources"]:
+                        del data[userid]
+            if data != self._read(root):
+                write_json(root / "pera-players.json", data)
+            for character in saved:
+                if character["userid"]:
+                    rows.append({"userid": character["userid"], "source": "save", "folder": character["folder"],
+                                 "shard": character["shard"]})
+                else:
+                    # Legacy live-console hints may name encoded folders. They are display hints only;
+                    # recovery always validates the user's explicitly selected destination on disk.
+                    matches = [p["userid"] for p in data.values() if "console" in p["sources"]
+                               and p["folders"].get(character["shard"]) == character["folder"]]
+                    if len(matches) == 1:
+                        character["userid"] = matches[0]
+            self.record_many(identifier, rows)
+            return saved
 
     def list(self, identifier):
         world = self.store.get(identifier)

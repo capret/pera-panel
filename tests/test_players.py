@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pera_panel.players import characters
+from pera_panel.players import characters, folder_userid
 from pera_panel.storage import PanelError, atomic_write
 from test_save_import import local_zip
 from test_web import wait_job
@@ -81,7 +81,7 @@ def test_discovery_reads_metadata_without_executing_lua_and_keeps_names(service)
 def test_recovery_requires_game_mapping_and_existing_target_and_keeps_backup(service):
     identifier, root = setup_characters(service)
     service.players.record(identifier, USER, source="cached_owner")
-    with pytest.raises(PanelError, match="Join online"):
+    with pytest.raises(PanelError, match="existing destination"):
         service.recover_character(identifier, SOURCE, USER, "Camp")
     service.players.record(identifier, USER, source="console", folder="A7ONLINE1234")
     result = service.recover_character(identifier, SOURCE, USER, "Camp")
@@ -105,7 +105,7 @@ def test_recovery_rejects_path_input(service, source):
 def test_recovery_refuses_running_world_wrong_confirmation_and_missing_target(service):
     identifier, root = setup_characters(service)
     service.players.record(identifier, USER, source="console", folder="A7MISSING")
-    with pytest.raises(PanelError, match="no longer exists"):
+    with pytest.raises(PanelError, match="existing destination"):
         service.recover_character(identifier, SOURCE, USER, "Camp")
     with pytest.raises(PanelError, match="world name"):
         service.recover_character(identifier, SOURCE, USER, "Wrong")
@@ -191,11 +191,13 @@ def test_player_probe_is_throttled_and_uses_random_markers(service):
     runtime.world_id = identifier
     process = MagicMock()
     process.poll.return_value = None
+    process.stdin.closed = False
     runtime.processes = {"Master": process}
     runtime.request_players(identifier)
     runtime.request_players(identifier)
     assert process.stdin.write.call_count == 1
     assert "GetClientTable()" in process.stdin.write.call_args[0][0]
+    assert "EncodeUserPath" not in process.stdin.write.call_args[0][0]
     assert runtime.probes[(identifier, "Master")].startswith("PERA_PLAYERS_")
 
 
@@ -213,3 +215,69 @@ def test_malformed_registry_record_does_not_break_logging(service):
     atomic_write(root / "pera-players.json", json.dumps({USER: {"userid": USER, "sources": None}}))
     service.players.log_line(identifier, f"Client authenticated: ({USER}) Survivor")
     assert service.players.list(identifier)[0]["name"] == "Survivor"
+
+
+def test_saved_folder_suffix_is_normalized_only_with_an_unambiguous_account_hint():
+    assert folder_userid(USER + "_", {USER}) == USER
+    assert folder_userid(USER + "_", {USER + "_"}) == USER + "_"
+    assert folder_userid(USER + "_", {USER, USER + "_"}) is None
+    assert folder_userid(USER + "_") is None
+    assert folder_userid(USER) == USER
+    assert folder_userid(USER + "__", {USER + "_"}) == USER + "_"
+
+
+def test_upgrade_repairs_suffixed_save_candidate_without_changing_permissions(service):
+    identifier, root = setup_characters(service)
+    atomic_write(root / SOURCE.replace("OU_76561198000000000", USER + "_") / "0000000010", "online")
+    atomic_write(root / "Master/save/cached_userid", USER)
+    service.players.record(identifier, USER + "_", source="save", folder=USER + "_")
+    saved = service.character_list(identifier)
+    player = next(p for p in service.players.list(identifier) if p["userid"] == USER)
+    assert "save" in player["sources"]
+    assert player["folders"] == {"Master": USER + "_"}
+    assert USER + "_" not in {p["userid"] for p in service.players.list(identifier)}
+    assert next(c for c in saved if c["folder"] == USER + "_")["userid"] == USER
+    assert service.store.get(identifier)["admins"] == []
+
+
+def test_suffix_discovery_preserves_authentic_ids_that_end_in_underscore(service):
+    identifier, root = setup_characters(service)
+    service.players.record(identifier, USER + "_", source="join", name="Real underscore account")
+    atomic_write(root / SOURCE.replace("OU_76561198000000000", USER + "_") / "0000000010", "online")
+    atomic_write(root / "Master/save/cached_userid", USER)
+    service.character_list(identifier)
+    assert {USER, USER + "_"}.issubset({p["userid"] for p in service.players.list(identifier)})
+
+
+def test_nul_terminated_character_metadata_is_read_without_altering_files(service):
+    identifier, root = setup_characters(service)
+    content = b'return {character="woodie"}\0'
+    meta = root / SOURCE / "0000000010.meta"
+    meta.write_bytes(content)
+    assert next(c for c in service.character_list(identifier) if c["path"] == SOURCE)["character"] == "woodie"
+    assert meta.read_bytes() == content
+
+
+def test_explicit_folder_recovery_does_not_require_live_console_or_known_account(client, auth, service):
+    identifier, root = setup_characters(service)
+    response = client.post(f"/api/worlds/{identifier}/recover-character", headers=auth,
+                           json={"source": SOURCE, "destination": TARGET, "confirmation": "Camp"})
+    assert response.status_code == 202
+    job = wait_job(service)
+    assert job["state"] == "completed", job.get("error")
+    assert job["result"]["destination"] == TARGET
+    assert (root / TARGET / "0000000010").read_bytes() == (root / SOURCE / "0000000010").read_bytes()
+    assert service.players.list(identifier) == []
+    assert service.runtime.events == []
+
+
+@pytest.mark.parametrize("destination", [SOURCE, "../outside", "Caves/save/session/0123456789ABCDEF/A7OTHER",
+                                         "Master/save/session/1123456789ABCDEF/A7OTHER"])
+def test_explicit_destination_rejects_same_folder_traversal_and_other_shard_session(service, destination):
+    identifier, root = setup_characters(service)
+    if destination.startswith(("Caves/", "Master/save/session/1123")):
+        atomic_write(root / destination / "0000000010", "other character")
+    with pytest.raises(PanelError):
+        service.recover_character(identifier, SOURCE, None, "Camp", destination)
+    assert not service.backups(identifier)
+    assert (root / TARGET / "0000000011").read_text() == "new character"

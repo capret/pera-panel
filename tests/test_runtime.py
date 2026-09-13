@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,6 +21,10 @@ print("Booted fake DST; token private-test-token", flush=True)
 for line in sys.stdin:
     print(line.strip(), flush=True)
     if line.startswith("c_shutdown"):
+        print("Shutting down", flush=True)
+        if pathlib.Path(sys.argv[1]).with_suffix(".wait-eof").exists():
+            sys.stdin.read()
+            print("Console EOF received; exiting", flush=True)
         pathlib.Path(sys.argv[1]).write_text("saved")
         break
 ''')
@@ -111,9 +116,45 @@ def test_native_rollback_rejects_missing_configured_shards(runtime):
 def test_stop_timeout_does_not_force_kill_in_normal_operations(runtime):
     process = MagicMock()
     process.poll.return_value = None
+    process.stdin.closed = False
     process.wait.side_effect = subprocess.TimeoutExpired("fake", 60)
     runtime.processes = {"Master": process}
     with pytest.raises(PanelError, match="No backup or restore"):
         runtime.stop()
     process.kill.assert_not_called()
+    runtime.processes = {}
+
+
+def test_stop_delivers_eof_before_waiting_for_console_reader_exit(runtime, tmp_path, monkeypatch):
+    world = validate_world({"name": "EOF shutdown", "token": "abc", "caves": True})
+    for shard in ("Master", "Caves"):
+        (tmp_path / f"{shard}.wait-eof").touch()
+    runtime.store.write_world(world)
+    runtime.start(world)
+    processes = list(runtime.processes.values())
+    for process in processes:
+        wait = process.wait
+        monkeypatch.setattr(process, "wait", lambda timeout=None, wait=wait: wait(timeout=min(timeout or 3, 3)))
+    started = time.monotonic()
+    runtime.stop()
+    assert time.monotonic() - started < 5
+    assert not runtime.active()
+    for shard in ("Master", "Caves"):
+        assert "Console EOF received; exiting" in runtime.log(world["id"], shard)
+        assert (tmp_path / f"{shard}.saved").read_text() == "saved"
+    assert all(p.stdin.closed and p.returncode == 0 for p in processes)
+
+
+def test_console_action_rejected_after_shutdown_input_is_closed(runtime):
+    world = validate_world({"name": "Exiting", "token": "abc", "caves": False})
+    runtime.store.write_world(world)
+    process = MagicMock()
+    process.poll.return_value = None
+    process.stdin.closed = True
+    runtime.world_id = world["id"]
+    runtime.processes = {"Master": process}
+    with pytest.raises(PanelError, match="console disconnected"):
+        runtime.command(world["id"], "save")
+    runtime.request_players(world["id"])
+    process.stdin.write.assert_not_called()
     runtime.processes = {}

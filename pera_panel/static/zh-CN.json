@@ -423,5 +423,16 @@
   "Start world at boot": "开机启动世界",
   "Identity not linked": "身份尚未关联",
   "Link a saved character": "关联角色存档",
-  "Join online in the same shard with this panel open. If asked, create a temporary character. Wait until your account appears below, then leave and stop the world. Recovery replaces that account’s existing character files in this shard after making a safety backup. Repeat for the other shard if needed.": "保持面板打开，在线加入同一分片。如果出现角色选择界面，请先创建一个临时角色。等待账号出现在下方后，退出游戏并停止世界。恢复操作会先创建安全备份，再替换该账号在此分片中已有的角色文件。如有需要，请对另一分片重复操作。"
+  "Join online in the same shard with this panel open. If asked, create a temporary character. Wait until your account appears below, then leave and stop the world. Recovery replaces that account’s existing character files in this shard after making a safety backup. Repeat for the other shard if needed.": "保持面板打开，在线加入同一分片。如果出现角色选择界面，请先创建一个临时角色。等待账号出现在下方后，退出游戏并停止世界。恢复操作会先创建安全备份，再替换该账号在此分片中已有的角色文件。如有需要，请对另一分片重复操作。",
+  "Stop the world and refresh the saved characters. Choose the original character, then the destination save created by your online join in the same shard and session. A safety backup is made before replacing the destination files. If no destination exists, join online and create a temporary character first.": "停止世界并刷新角色存档。先选择原角色，再选择在线加入后在同一分片、同一世界会话中生成的目标存档。替换目标文件前会创建安全备份。如果没有目标存档，请先在线加入并创建一个临时角色。",
+  "Destination character save": "目标角色存档",
+  "Choose a destination save": "选择目标存档",
+  "Unidentified account": "账号尚未识别",
+  "Choose the original saved character first.": "请先选择原角色存档。",
+  "No other character save exists in this shard and session. Join online, create a temporary character if needed, then stop the world and refresh.": "此分片和世界会话中没有其他角色存档。请在线加入，必要时创建临时角色，然后停止世界并刷新。",
+  "Choose the destination save created by your online join. Recovery copies into that exact folder. Account labels are hints; no character is assigned automatically.": "请选择在线加入后生成的目标存档。恢复操作会复制到所选的这个文件夹。账号标签仅供核对，面板不会自动分配角色。",
+  "Select an original character and a destination save.": "请选择原角色和目标存档。",
+  "Copy {source} into {destination}, replacing its character files? A safety backup is made first. Type “{name}” to continue.": "将 {source} 复制到 {destination} 并替换其中的角色文件？操作前会创建安全备份。请输入“{name}”继续。",
+  "Choose an existing destination character save. Refresh the page to use folder selection.": "请选择已有的目标角色存档。请刷新页面以使用文件夹选择功能。",
+  "Source and destination must belong to the same shard and world session.": "原存档和目标存档必须属于同一分片、同一世界会话。"
 }

@@ -197,7 +197,7 @@ def create_app(config, service=None):
         data = body()
         service.store.get(identifier)
         return operation("Recover character", lambda: service.recover_character(
-            identifier, data.get("source"), data.get("userid"), data.get("confirmation")))
+            identifier, data.get("source"), data.get("userid"), data.get("confirmation"), data.get("destination")))
 
     @app.get("/api/worlds/<identifier>/backups")
     def backups(identifier):

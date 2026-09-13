@@ -182,10 +182,7 @@ function renderPlayers() {
     candidates.innerHTML += unknown.map(c => `<div class="player-candidate"><div><strong>${escapeHTML(c.character || c.folder)}</strong><small>${escapeHTML(c.folder)} · ${h('Identity not linked')} · ${escapeHTML(t(c.shard === 'Master' ? 'Surface' : 'Caves'))}</small></div><button type="button" class="button" data-match-character="${escapeHTML(c.path)}">${h('Link a saved character')}</button></div>`).join('');
     I18n.bind(candidates);
   }
-  const account = $('#character-account'), previous = account.value;
-  account.innerHTML = `<option value="" data-i18n>Choose an online account</option>` + rows.filter(p => p.sources.includes('console') && Object.keys(p.folders || {}).length).map(p => `<option value="${escapeHTML(p.userid)}">${escapeHTML(p.name ? p.name + ' · ' + p.userid : p.userid)}</option>`).join('');
-  if ([...account.options].some(option => option.value === previous)) account.value = previous;
-  I18n.bind(account);
+  renderDestinations();
 }
 async function loadPlayers(force = false) {
   if (!selected || playerPolling || (!force && playerWorld === selected && Date.now() - playerPollAt < 5000)) return;
@@ -211,7 +208,16 @@ function renderCharacters() {
   select.innerHTML = `<option value="" data-i18n>Choose a saved character</option>` + characterRows.map(c => `<option value="${escapeHTML(c.path)}">${escapeHTML(t(c.shard === 'Master' ? 'Surface' : 'Caves') + ' · ' + (c.character || c.folder) + ' · ' + c.folder + ' / ' + c.snapshot + ' · ' + c.session)}</option>`).join('');
   if ([...select.options].some(option => option.value === previous)) select.value = previous;
   I18n.bind(select);
-  I18n.text('#character-info', characterRows.length ? 'Encoded or offline folder names are not Klei IDs. Select the original character carefully; the cached owner is not assigned automatically.' : 'No character snapshots found. Include the complete shard save folders in your ZIP.');
+  renderDestinations();
+}
+function renderDestinations() {
+  const source = characterWorld === selected ? characterRows.find(c => c.path === $('#character-source').value) : null;
+  const targets = source ? characterRows.filter(c => c.shard === source.shard && c.session === source.session && c.path !== source.path) : [];
+  const select = $('#character-account'), previous = select.value;
+  select.innerHTML = `<option value="" data-i18n>Choose a destination save</option>` + targets.map(c => `<option value="${escapeHTML(c.path)}">${escapeHTML((c.userid || t('Unidentified account')) + ' · ' + (c.character ? c.character + ' · ' : '') + c.folder + ' / ' + c.snapshot)}</option>`).join('');
+  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  I18n.bind(select);
+  I18n.text('#character-info', !characterRows.length ? 'No character snapshots found. Include the complete shard save folders in your ZIP.' : !source ? 'Choose the original saved character first.' : !targets.length ? 'No other character save exists in this shard and session. Join online, create a temporary character if needed, then stop the world and refresh.' : 'Choose the destination save created by your online join. Recovery copies into that exact folder. Account labels are hints; no character is assigned automatically.');
 }
 async function loadBackups() {
   if (!selected) return;
@@ -267,12 +273,12 @@ document.addEventListener('click', async event => {
       input.value = ids.join('\n');
       toast('ID added to the form. Save settings to apply it.');
     }
-    if (target.dataset.matchCharacter) { setTab('backups'); $('#character-source').value = target.dataset.matchCharacter; $('#character-source').focus(); }
+    if (target.dataset.matchCharacter) { setTab('backups'); $('#character-source').value = target.dataset.matchCharacter; renderDestinations(); $('#character-source').focus(); }
     if (target.id === 'refresh-characters') await loadCharacters();
     if (target.id === 'recover-character') {
-      const url = worldURL(), source = $('#character-source').value, userid = $('#character-account').value;
-      if (!source || !userid) throw new I18n.Error('Select an original character and an online destination account.');
-      confirmAction('Recover this character?', msg('Replace character files for {userid} using {source}? A safety backup is made first. Type “{name}” to continue.', {userid,source,name:world().name}), 'World name', '', confirmation => queued(url + '/recover-character','POST',{source,userid,confirmation}));
+      const url = worldURL(), source = $('#character-source').value, destination = $('#character-account').value;
+      if (!source || !destination) throw new I18n.Error('Select an original character and a destination save.');
+      confirmAction('Recover this character?', msg('Copy {source} into {destination}, replacing its character files? A safety backup is made first. Type “{name}” to continue.', {source,destination,name:world().name}), 'World name', '', confirmation => queued(url + '/recover-character','POST',{source,destination,confirmation}));
     }
     if (target.id === 'native-rollback') {
       const url = worldURL(), count = Number($('#rollback-count').value);
@@ -307,6 +313,7 @@ $('#confirm-form').addEventListener('submit', async event => {
   finally { $('#confirm-submit').disabled = false; }
 });
 $('#log-shard').addEventListener('change', () => loadLogs().catch(error => toast(I18n.error(error),true)));
+$('#character-source').addEventListener('change', renderDestinations);
 $('#choose-save').addEventListener('click', () => $('#save-zip').click());
 $('#save-zip').addEventListener('change', () => {
   const file = $('#save-zip').files[0];

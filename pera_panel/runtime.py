@@ -143,6 +143,10 @@ class Runtime:
             if required:
                 raise PanelError("The game console disconnected. Inspect the shard log.", 409)
             return
+        if not process.stdin or process.stdin.closed:
+            if required:
+                raise PanelError("The game console disconnected. Inspect the shard log.", 409)
+            return
         try:
             process.stdin.write(command + "\n")
             process.stdin.flush()
@@ -155,12 +159,12 @@ class Runtime:
                 raise PanelError("This world is stopped.", 409)
             if action == "save":
                 for process in self.processes.values():
-                    self._send(process, "c_save()")
+                    self._send(process, "c_save()", required=True)
             elif action == "announce":
                 master = self.processes.get("Master")
                 if not master or master.poll() is not None:
                     raise PanelError("The surface shard is stopped.", 409)
-                self._send(master, f"c_announce({lua(message)})")
+                self._send(master, f"c_announce({lua(message)})", required=True)
             else:
                 raise PanelError("Unknown console action.")
 
@@ -182,17 +186,16 @@ class Runtime:
                 return
             self.probe_at = time.monotonic()
             for shard, process in self.processes.items():
-                if process.poll() is not None:
+                if process.poll() is not None or not process.stdin or process.stdin.closed:
                     continue
                 marker = "PERA_PLAYERS_" + secrets.token_hex(16)
                 self.probes[(identifier, shard)] = marker
-                # Only game-generated responses with the current random marker can provide path mappings.
+                # Discover identities independently of save-path encoding. Folder recovery uses
+                # existing paths on disk; a failed/unsupported encoding API must not hide accounts.
                 command = ('local p={} for _,v in ipairs(TheNet:GetClientTable() or {}) do '
                            'if v.performance==nil and #p<64 then '
-                           'local ok,f=pcall(function() return TheNet:GetDefaultEncodeUserPath() '
-                           'and TheNet:EncodeUserPath(v.userid) or v.userid end) '
-                           'p[#p+1]={userid=v.userid,name=string.sub(v.name or "",1,100),folder=ok and f or ""} '
-                           'end end print("' + marker + '"..json.encode(p))')
+                           'p[#p+1]={userid=v.userid,name=string.sub(v.name or "",1,100)} '
+                           'end end print("' + marker + '"..require("json").encode(p))')
                 self._send(process, command)
 
     def _player_response(self, identifier, shard, output):
@@ -222,11 +225,19 @@ class Runtime:
     def stop(self, force=False):
         with self.lock:
             processes = list(self.processes.values())
-        for process in processes:
-            try:
-                self._send(process, "c_shutdown(true)")
-            except PanelError:
-                pass
+            for process in processes:
+                try:
+                    self._send(process, "c_shutdown(true)")
+                except PanelError:
+                    pass
+                finally:
+                    # Flush the shutdown request, then deliver EOF before waiting. A console
+                    # input reader can otherwise keep a saving/exiting child waiting forever.
+                    if process.stdin and not process.stdin.closed:
+                        try:
+                            process.stdin.close()
+                        except OSError:
+                            pass
         deadline = time.monotonic() + 60
         for process in processes:
             try:
