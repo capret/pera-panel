@@ -14,6 +14,7 @@ A self-hosted **Don’t Starve Together** server manager for **Ubuntu 22.04+ / D
 - Replaces a world from an uploaded local save ZIP, optionally inheriting Workshop mod settings (on by default).
 - Updates or reinstalls software while preserving worlds, backups, and admin credentials.
 - Uses a generated admin password, hashed credentials, CSRF protection, login throttling, and an unprivileged systemd service.
+- Supports Simplified Chinese and English on the login page and throughout the dashboard. The language selector remembers your preference in this browser and preserves unsaved form edits. The initial language follows your browser; world names, custom backup labels, mod option keys, and raw game logs remain unchanged.
 
 **Rollback means restoring a panel backup**, not selecting an arbitrary in-game day. “Save game now” requests a native save; use “Create backup” to make a restore point. World generation happens on the first game start. The UI reports process health, not Steam lobby reachability or live player counts.
 
@@ -26,7 +27,18 @@ cd /home/ubuntu/pera-panel
 sudo bash install.sh install
 ```
 
-The installer downloads the game through SteamCMD with anonymous login (app `343050`), creates the `pera-panel` system user, and starts the panel at `127.0.0.1:8080`. It prints a generated password for username **admin**. Existing credentials are preserved on subsequent installs.
+Before installing, the script guides you through language, panel address/port, and firewall settings. Press Enter to accept **0.0.0.0:8080** and **automatic UFW setup**. It detects SSH ports and lets you specify an additional SSH port to preserve. Choose `manual` if you manage your firewall separately. The maintenance menu includes Chinese and English labels.
+
+The installer downloads the game through SteamCMD with anonymous login (app `343050`), creates the `pera-panel` system user, and prints a generated password for username **admin**. Existing credentials, game downloads, and worlds are retained when you rerun installation. Existing bind/port settings become the setup defaults; ordinary updates keep them without prompting.
+
+For unattended setup, explicit arguments or environment variables supply the same defaults:
+
+```bash
+sudo bash install.sh install --yes --bind 0.0.0.0 --port 8080 --firewall auto --ssh-port 22 --lang zh-CN
+# Equivalent defaults: PERA_BIND, PERA_PORT, PERA_FIREWALL, PERA_SSH_PORT, PERA_LANG
+```
+
+The panel port must be 1024–65535. Setup currently accepts IPv4 bind addresses. To change networking after installation, run `sudo pera-panel configure` or select **13) Network setup / 网络设置**. Your administrator credentials remain unchanged.
 
 Keep the uploaded source directory: panel updates reuse it. Upload changed code there, then run `sudo pera-panel update-panel`.
 
@@ -49,26 +61,30 @@ Only execute installer code from a repository you trust. This installer requires
 
 ## Open the panel and create your first world
 
-From **your computer**, keep this SSH tunnel running:
+With the default setup, open `http://YOUR_SERVER_IP:8080`. The bind address `0.0.0.0` means all local IPv4 interfaces; it is not the address to enter in your browser. For a cloud VPS, allow TCP 8080 and the game UDP ports in the provider’s security group/firewall as well.
+
+If you choose a loopback bind (`127.0.0.1`), keep this SSH tunnel running from **your computer**:
 
 ```bash
 ssh -L 8080:127.0.0.1:8080 ubuntu@YOUR_SERVER_IP
 ```
 
-1. Open [http://127.0.0.1:8080](http://127.0.0.1:8080) and sign in with the printed credentials.
+1. Open your server’s panel URL (or [http://127.0.0.1:8080](http://127.0.0.1:8080) through the tunnel) and sign in with the printed credentials. Use **Language / 语言** to switch between English and Simplified Chinese.
 2. Click **Create a world**. Choose a name, game mode, slots, and whether to include caves.
 3. Generate a dedicated server token at [Klei Accounts → Game Servers](https://accounts.klei.com/account/game/servers?game=DontStarveTogether) and paste it into the world form or settings. You need a valid Klei token to start an online world.
 4. Add any Workshop mods before the first start, especially world generation mods.
 5. Click **Start world**, and check **Live logs** for generation, token authentication, and registration errors. First startup and mod downloads can take several minutes.
 6. Find the configured world name in DST’s server browser.
 
-For public HTTPS access, adapt [deploy/nginx.conf.example](deploy/nginx.conf.example). Keep the panel on loopback behind your reverse proxy. Set `secure_cookie` to `true` in `/etc/pera-panel/config.json` when using HTTPS, then restart. The panel does not automatically obtain TLS certificates or modify your firewall.
+For HTTPS access, adapt [deploy/nginx.conf.example](deploy/nginx.conf.example). Bind the panel to loopback behind your reverse proxy and set `secure_cookie` to `true` in `/etc/pera-panel/config.json`, then restart. The installer does not obtain TLS certificates. With a proxy, allow its HTTPS port in your host/provider firewall.
 
-If needed, first-install binding can be changed with `sudo PERA_BIND=0.0.0.0 PERA_PORT=8080 bash install.sh install`. Subsequent changes belong in `/etc/pera-panel/config.json`; use HTTPS for access over the public Internet.
+Public binding uses HTTP until you configure a TLS reverse proxy; use HTTPS or the SSH tunnel when sending credentials over an untrusted network.
 
 ## Network ports
 
-Allow the game ports in both your VPS provider’s firewall and the server firewall. No inbound panel port is needed with the SSH tunnel.
+Automatic setup installs UFW if needed, adds the panel/game rules and detected/configured SSH ports, then enables UFW. Existing rules and default policies are retained; no firewall reset is performed. Enabling an inactive UFW applies its existing policies to other services too, so use `--firewall manual` on a host whose firewall you manage yourself. Loopback panel binds do not add a public panel rule. Port changes add the new rule without deleting older rules, which may serve other applications.
+
+**Cloud provider rules are separate.** For Tencent Cloud, add these inbound rules in the instance’s security group or Lighthouse firewall. The installer cannot change cloud rules without your provider account/API access. No inbound panel port is needed when using the SSH tunnel.
 
 | Purpose | Ports | Exposure |
 | --- | --- | --- |
@@ -76,17 +92,18 @@ Allow the game ports in both your VPS provider’s firewall and the server firew
 | Steam authentication | UDP 8766 / 8767 | Steam networking |
 | Steam master server | UDP 27016 / 27017 | Steam networking |
 | Shard connection | UDP 10888 | Loopback only; keep private |
-| Web panel | TCP 8080 | Loopback by default |
+| Web panel | TCP 8080 (or your selected port) | All IPv4 interfaces by default |
 
-For an **already enabled** UFW firewall:
+When using manual firewall mode, these are the default application rules:
 
 ```bash
+sudo ufw allow 8080/tcp
 sudo ufw allow 10999:11000/udp
 sudo ufw allow 8766:8767/udp
 sudo ufw allow 27016:27017/udp
 ```
 
-Do not enable a new firewall remotely without first allowing your SSH port. Outbound access to Steam, Steam Workshop, and Klei must also work. The installer does not configure networking or NAT for you.
+Allow the actual SSH port before manually enabling a firewall. Outbound access to Steam, Steam Workshop, and Klei must also work. The installer does not configure provider firewalls, NAT, or port forwarding.
 
 ## Maintenance
 
@@ -102,6 +119,7 @@ sudo pera-panel stop               # Stops panel and game processes
 sudo pera-panel restart
 sudo pera-panel logs
 sudo pera-panel reset-password
+sudo pera-panel configure          # Guided bind/port/firewall settings
 sudo pera-panel uninstall          # Preserve worlds/backups/credentials
 ```
 
@@ -120,6 +138,19 @@ sudo pera-panel uninstall --purge
 ```
 
 Installed OS packages are not removed, since other software may use them.
+
+## Recover an interrupted installation
+
+If Steam reports **Success! App '343050' fully installed.** followed by **ln: Permission denied**, the game download succeeded and setup failed during Steam library link creation. This version runs service-user commands from `/var/lib/pera-panel` instead of inheriting a private caller directory, explicitly repairs ownership/mode on `.steam` and both SDK subdirectories, and creates the library links as `pera-panel`. It reports the link step separately. An unexpected linked SDK directory is reported for inspection instead of following it.
+
+Upload this updated project (or publish it to your GitHub repository and download the updated installer) and rerun **install**, not reinstall. SteamCMD validates/reuses the existing game files; it does not intentionally create a fresh game tree. For an uploaded copy:
+
+```bash
+cd /home/ubuntu/pera-panel
+sudo bash install.sh install --source "$PWD"
+```
+
+Messages such as **Failed to connect to system scope bus** indicate a separate systemd problem. Setup now checks the manager before work and after package installation, and sets `NEEDRESTART_MODE=l` so dependency installation does not automatically restart SSH/network services. If systemd remains unreachable, reboot the server after its package upgrades and rerun installation. The script reports this condition instead of continuing into service deployment. A real server retry is still needed to confirm resolution of a reported host failure.
 
 ## Replace a world with a local save ZIP
 
@@ -203,6 +234,7 @@ ruff check .
 bash -n install.sh
 shellcheck install.sh
 node --check pera_panel/static/app.js
+node --check pera_panel/static/i18n.js
 ```
 
 Tests cover authentication/CSRF, hostile config inputs, shard configuration, operation serialization, process control using a fake game executable, paired backup restoration, failure recovery, and preservation of current credentials. GitHub Actions runs them on Linux. The installer’s full apt/SteamCMD/systemd lifecycle and real Steam/Klei connectivity still require a smoke test on your target server with a valid token.

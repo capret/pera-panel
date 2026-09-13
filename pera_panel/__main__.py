@@ -24,6 +24,7 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8080, type=int)
     parser.add_argument("--reset", action="store_true")
+    parser.add_argument("--configure-network", action="store_true")
     parser.add_argument("--prompt-password", action="store_true")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
@@ -32,6 +33,12 @@ def main():
     path = Path(args.config).resolve()
     if args.command == "init-admin":
         if path.exists() and not args.reset:
+            if args.configure_network:
+                config = json.loads(path.read_text(encoding="utf-8"))
+                config.update(host=args.host, port=args.port)
+                write_json(path, config)
+                print(f"Panel address updated: {args.host}:{args.port}. Credentials preserved.")
+                return
             print("Existing credentials and settings preserved.")
             return
         config = json.loads(path.read_text()) if path.exists() else {

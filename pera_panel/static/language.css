@@ -1,0 +1,10 @@
+:root { --sans: Inter, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; }
+.language-switch { display:flex; flex-direction:row; align-items:center; gap:8px; margin:0; flex-shrink:0; font-size:11px; }
+.language-switch select { width:auto; min-width:104px; padding:7px 25px 7px 10px; font-size:11px; }
+.login-card > .language-switch { justify-content:flex-end; margin-bottom:24px; }
+html[lang="zh-CN"] { --serif: 'Noto Serif SC', 'Songti SC', SimSun, Georgia, serif; }
+html[lang="zh-CN"] .eyebrow, html[lang="zh-CN"] .sidebar-label { letter-spacing:1px; }
+html[lang="zh-CN"] h1, html[lang="zh-CN"] .camp-card h2, html[lang="zh-CN"] .dialog-heading h2 { letter-spacing:0; }
+.save-file-picker { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+#save-filename { overflow-wrap:anywhere; color:var(--muted); font-size:12px; }
+@media(max-width:700px) { .topbar-right { gap:8px; } .topbar { gap:12px; } .topbar > div:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .language-switch > span { display:none; } .language-switch select { min-width:95px; } }

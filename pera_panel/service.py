@@ -131,7 +131,7 @@ class Service:
             finally:
                 self.resume_after_operation = None
 
-    def _snapshot(self, identifier, label):
+    def _snapshot(self, identifier, label, *, system_label=False):
         source = self.store.world_path(identifier)
         # Never follow local symlinks into unrelated files when copying or restoring a world.
         if any(path.is_symlink() for path in source.rglob("*")):
@@ -143,6 +143,7 @@ class Service:
         try:
             shutil.copytree(source, staging / "cluster", ignore=shutil.ignore_patterns("server_log.txt", "*.tmp"))
             write_json(staging / "backup.json", {"id": snapshot_id, "label": label,
+                       "label_i18n": label if system_label else None,
                        "created_at": datetime.now(timezone.utc).isoformat(),
                        "size_mb": round(sum(p.stat().st_size for p in staging.rglob("*") if p.is_file()) / 1024**2, 2)})
             staging.rename(root / snapshot_id)
@@ -187,7 +188,7 @@ class Service:
         previous = root.with_name(".previous-" + uuid.uuid4().hex)
         with self.paused(identifier):
             try:
-                safety_id = self._snapshot(identifier, "Before rollback")
+                safety_id = self._snapshot(identifier, "Before rollback", system_label=True)
                 shutil.copytree(source, staging)
                 root.rename(previous)
                 try:
@@ -224,7 +225,7 @@ class Service:
             # Keep recovery data outside the temporary tree if rollback itself encounters an I/O error.
             previous = root.with_name(".previous-import-" + uuid.uuid4().hex)
             with self.paused(identifier, restart=False):
-                safety_id = self._snapshot(identifier, "Before save import")
+                safety_id = self._snapshot(identifier, "Before save import", system_label=True)
                 root.rename(previous)
                 try:
                     prepared.rename(root)
@@ -249,7 +250,7 @@ class Service:
         if confirmation != world["name"]:
             raise PanelError("Type the world name exactly to delete it.")
         self.require_stopped(identifier)
-        safety = self._snapshot(identifier, "Before world deletion")
+        safety = self._snapshot(identifier, "Before world deletion", system_label=True)
         # Archive instead of deleting so the world remains recoverable through the filesystem.
         archive = self.store.root / "deleted"
         archive.mkdir(exist_ok=True)

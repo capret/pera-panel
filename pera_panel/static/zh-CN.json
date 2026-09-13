@@ -366,5 +366,9 @@
   "banned": "封禁列表",
   "whitelist": "白名单",
   "Announcement": "公告",
-  "Backup label": "备份名称"
+  "Backup label": "备份名称",
+  "Choose ZIP file": "选择 ZIP 文件",
+  "No file chosen": "尚未选择文件",
+  "Graceful shutdown timed out. No backup or restore was performed. Inspect the logs, then retry Stop.": "正常关闭超时，未执行备份或恢复。请查看日志后再次尝试停止。",
+  "Workshop {id}": "创意工坊 {id}"
 }

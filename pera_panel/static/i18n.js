@@ -19,9 +19,14 @@ window.I18n = (() => {
   function text(target, message, params = {}) {
     const element = typeof target === 'string' ? document.querySelector(target) : target;
     element.textContent = t(message, params);
-    bindings.set(element.firstChild || element, {message: descriptor(message, params), prefix:'', suffix:''});
+    if (!element.firstChild) element.appendChild(document.createTextNode(''));
+    bindings.set(element.firstChild, {message: descriptor(message, params), prefix:'', suffix:''});
   }
   function bind(root = document) {
+    root.querySelectorAll('[data-i18n-message]').forEach(element => {
+      const value = JSON.parse(element.dataset.i18nMessage);
+      if (!bindings.has(element.firstChild)) text(element, value);
+    });
     root.querySelectorAll('[data-i18n]').forEach(element => {
       for (const node of element.childNodes) {
         if (node.nodeType !== Node.TEXT_NODE || !node.textContent.trim() || bindings.has(node)) continue;
@@ -33,7 +38,8 @@ window.I18n = (() => {
       root.querySelectorAll(`[data-i18n-${attribute}]`).forEach(element => {
         if (!attributes.has(element)) attributes.set(element, {});
         const entries = attributes.get(element);
-        if (!entries[attribute]) entries[attribute] = element.getAttribute(attribute);
+        if (!entries[attribute]) entries[attribute] = element.getAttribute(`data-i18n-${attribute}`)
+          ? JSON.parse(element.getAttribute(`data-i18n-${attribute}`)) : element.getAttribute(attribute);
       });
     }
     update();
