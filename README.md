@@ -2,8 +2,6 @@
 
 A self-hosted **Don’t Starve Together** server manager for **Ubuntu 22.04+ / Debian 12+, x86_64, with systemd**. One installer sets up SteamCMD, the DST dedicated server, and a Flask + Waitress dashboard. Run the same script again, or `sudo pera-panel`, for an interactive maintenance menu.
 
-Inspired by the install-and-manage workflow of [3x-ui](https://github.com/MHSanaei/3x-ui). This is an independent project, with no 3x-ui source code or Klei/Valve affiliation.
-
 ## What it does
 
 - Creates separate saved worlds with surface and optional caves. **One world runs at a time**, using fixed ports.
