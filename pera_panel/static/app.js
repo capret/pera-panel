@@ -71,7 +71,11 @@ async function navigate(path, {replace = false} = {}) {
 function setTab(tab) { return selected ? navigate(`/worlds/${selected}/${tab}`) : Promise.resolve(); }
 function selectWorld(id) { return navigate(`/worlds/${id}/overview`); }
 function renderActivity(selector, jobs, global = false) {
-  $(selector).innerHTML = jobs.map(job => `<div class="activity"><span class="activity-icon ${job.state === 'failed' ? 'failed' : ''}">${job.state === 'completed' ? '✓' : job.state === 'failed' ? '!' : '↻'}</span><div><strong>${escapeHTML(t(job.title))}</strong>${global ? `<small>${escapeHTML(job.world_name || state.worlds.find(w => w.id === job.world_id)?.name || job.world_id || t('Panel / legacy activity'))}</small>` : ''}<small>${escapeHTML(t(I18n.message(job.error_i18n) || job.error || job.state))} · ${date(job.created_at)}</small></div></div>`).join('') || `<p class="muted quiet-empty">${h('No activity for this view yet.')}</p>`;
+  $(selector).innerHTML = jobs.map(job => {
+    const failed = job.state === 'failed';
+    const error = I18n.message(job.error_i18n) || job.error;
+    return `<div class="activity"><span aria-hidden="true" class="activity-icon ${failed ? 'failed' : job.state === 'completed' ? '' : 'pending'}">${job.state === 'completed' ? '✓' : failed ? '!' : '↻'}</span><div><strong>${escapeHTML(t(job.title))}</strong>${global ? `<small>${escapeHTML(job.world_name || state.worlds.find(w => w.id === job.world_id)?.name || job.world_id || t('Panel / legacy activity'))}</small>` : ''}<small${failed ? ' class="activity-error"' : ''}>${escapeHTML(t(job.state))} · ${date(job.created_at)}</small>${error ? `<small class="activity-error">${escapeHTML(t(error))}</small>` : ''}</div></div>`;
+  }).join('') || `<p class="muted quiet-empty">${h('No activity for this view yet.')}</p>`;
   I18n.bind($(selector));
 }
 function render() {
@@ -88,13 +92,20 @@ function render() {
   $('#world-actions').hidden = !item;
   $('#world-list').innerHTML = state.worlds.map(w => `<button class="world-item ${w.id === selected ? 'selected' : ''}" data-world="${w.id}"><span class="world-glyph">◈</span><span>${escapeHTML(w.name)}<small>${t(w.caves ? 'Surface + caves' : 'Surface only')}</small></span><i class="world-dot ${w.runtime.state === 'running' ? 'online' : ''}"></i></button>`).join('');
   $('#world-name').textContent = item?.name || t(currentPage === 'archives' ? 'Archived worlds' : 'Server overview');
-  $('#world-description').textContent = item ? item.description || t('Build a camp. Bring your friends. Keep the fire going.') : t(currentPage === 'archives' ? 'Manage archived worlds and reclaim disk space.' : 'Host resources, all worlds, and panel activity.');
+  $('#world-description').textContent = item ? item.description : t(currentPage === 'archives' ? 'Manage stored worlds and free up space.' : 'Monitor your server and manage your worlds.');
+  $('#world-description').hidden = !$('#world-description').textContent;
+  $('.workspace-name').classList.toggle('active', currentPage === 'server');
+  $('.workspace-name').setAttribute('aria-current', currentPage === 'server' ? 'page' : 'false');
+  $('#open-archives').classList.toggle('active', currentPage === 'archives');
+  $('#open-archives').setAttribute('aria-current', currentPage === 'archives' ? 'page' : 'false');
+  $('#world-state').dataset.state = item?.runtime.state || 'stopped';
   document.title = (item ? item.name + ' · ' + t({overview:'World overview',settings:'World settings',mods:'Workshop mods',backups:'Backups & rollback',logs:'Live logs'}[currentTab]) : t(currentPage === 'archives' ? 'Archived worlds' : 'Server overview')) + ' · Pera Panel';
   $('#breadcrumb-world').textContent = item ? item.name + ' / ' + t({overview:'World overview',settings:'World settings',mods:'Workshop mods',backups:'Backups & rollback',logs:'Live logs'}[currentTab]) : t(currentPage === 'archives' ? 'Archived worlds' : 'Server overview');
   document.querySelectorAll('[data-tab]').forEach(link => { link.classList.toggle('active', link.dataset.tab === currentTab); link.setAttribute('aria-current', link.dataset.tab === currentTab ? 'page' : 'false'); link.href = selected ? `/worlds/${selected}/${link.dataset.tab}` : '/overview'; });
   document.querySelectorAll('.tab-panel').forEach(panel => { panel.hidden = panel.id !== 'tab-' + currentTab; });
   const runtime = item?.runtime;
   $('#native-rollback').disabled = Boolean(state.busy) || runtime?.state !== 'running';
+  $('#announce-button').disabled = Boolean(state.busy) || !['running','degraded'].includes(runtime?.state);
   $('#rollback-count').max = item?.snapshots || 50;
   updateRecoveryButton();
   $('#refresh-characters').disabled = Boolean(state.busy);
@@ -108,7 +119,7 @@ function render() {
   const busy = state.jobs.find(job => job.id === state.busy);
   $('#open-import').disabled = Boolean(busy) || uploading;
   $('#busy-banner').hidden = !busy;
-  $('#busy-banner').textContent = busy ? t('{job}… You can follow progress in the logs. Other changes are paused until this finishes.', {job: msg(busy.title)}) : '';
+  $('#busy-banner').textContent = busy ? t('{job}… Other changes are paused. See logs for progress.', {job: msg(busy.title)}) : '';
   document.querySelectorAll('[data-action]').forEach(button => {
     const action = button.dataset.action;
     const active = runtime && ['running','degraded'].includes(runtime.state);
@@ -116,7 +127,7 @@ function render() {
   });
   renderActivity('#activity-list', state.jobs.filter(job => selected && job.world_id === selected).slice(0, 5));
   renderActivity('#server-activity-list', state.jobs.slice(0, 10), true);
-  $('#server-worlds').innerHTML = state.worlds.map(w => `<button class="server-world-row" data-world="${w.id}"><span><strong>${escapeHTML(w.name)}</strong><small>${escapeHTML(t(w.caves ? 'Surface + caves' : 'Surface only'))}</small></span><span class="status-tag">${escapeHTML(t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[w.runtime.state]))}</span></button>`).join('') || `<p class="quiet-empty">${h('No world yet')}</p>`;
+  $('#server-worlds').innerHTML = state.worlds.map(w => `<button class="server-world-row" data-world="${w.id}"><span><strong>${escapeHTML(w.name)}</strong><small>${escapeHTML(t(w.caves ? 'Surface + caves' : 'Surface only'))}</small></span><span class="status-tag" data-state="${w.runtime.state}">${escapeHTML(t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[w.runtime.state]))}</span></button>`).join('') || `<p class="quiet-empty">${h('No world yet')}</p>`;
   if (!item) return;
   $('#mod-count').textContent = item.mods.filter(mod => mod.enabled).length;
   $('#max-players').textContent = t('{count} survivors', {count: item.max_players});
@@ -124,7 +135,7 @@ function render() {
   $('#autostart-value').textContent = t(item.autostart ? 'Yes' : 'No');
   $('#shard-list').innerHTML = ['Master', ...(item.caves ? ['Caves'] : [])].map(name => {
     const shard = runtime.shards.find(s => s.name === name);
-    return `<article class="shard"><div class="shard-art ${name === 'Caves' ? 'cave-art' : ''}">${name === 'Master' ? '♧' : '◇'}</div><div><h3>${t(name === 'Master' ? 'The surface' : 'The caves')}</h3><small>${t(name === 'Master' ? 'A world of possibility' : 'A little deeper into the unknown')}</small></div><span class="status-tag ${shard?.running ? 'running' : ''}">${shard?.running ? t('Process running') : shard ? t('Exited · {code}', {code: shard.exit_code}) : t('Stopped')}</span></article>`;
+    return `<article class="shard"><div class="shard-art ${name === 'Caves' ? 'cave-art' : ''}">${name === 'Master' ? '♧' : '◇'}</div><div><h3>${t(name === 'Master' ? 'The surface' : 'The caves')}</h3></div><span class="status-tag ${shard?.running ? 'running' : ''}">${shard?.running ? t('Process running') : shard ? t('Exited · {code}', {code: shard.exit_code}) : t('Stopped')}</span></article>`;
   }).join('');
   I18n.bind($('#activity-list'));
 }
@@ -183,7 +194,7 @@ function fillSettings() {
   const check = (key, title) => `<label data-i18n class="checkbox"><input type="checkbox" name="${key}" ${w[key] ? 'checked' : ''}>${title}</label>`;
   const json = (key, title) => `<label data-i18n>${title}<textarea class="code-input" name="${key}" rows="5">${escapeHTML(JSON.stringify(w[key], null, 2))}</textarea></label>`;
   const ids = (key, title) => `<label data-i18n>${title}<textarea name="${key}" rows="3" data-i18n-placeholder placeholder="KU_abcdefgh, one per line">${escapeHTML(w[key].join('\n'))}</textarea></label>`;
-  $('#settings-form').innerHTML = `<div class="form-grid">${input('name','World name')}${input('description','Description')}${input('password','Join password','password')}<label data-i18n>Klei cluster token<input name="token" type="password" autocomplete="off" data-i18n-placeholder placeholder="${w.has_token ? 'Token saved · leave blank to keep' : 'Paste your Klei token'}"></label><label data-i18n>Game mode<select name="game_mode">${['survival','endless','wilderness'].map(mode => `<option data-i18n value="${mode}" ${mode === w.game_mode ? 'selected' : ''}>${mode}</option>`).join('')}</select></label><label data-i18n>Player slots<input type="number" min="1" max="64" name="max_players" value="${w.max_players}"></label></div><div class="checks">${check('caves','Include caves')}${check('pause_when_empty','Pause when empty')}${check('pvp','Allow PvP')}${check('autostart','Start this world at boot')}</div><details><summary data-i18n>World generation & in-game snapshots</summary><p data-i18n class="field-help">Overrides are JSON objects, for example {"season_start":"autumn","world_size":"default"}. Existing terrain will not regenerate. For a fresh layout, create a new world.</p><div class="form-grid">${json('master_overrides','Surface overrides')}${json('caves_overrides','Caves overrides')}<label data-i18n>In-game save snapshots<input type="number" name="snapshots" min="1" max="50" value="${w.snapshots}"></label></div></details><details><summary data-i18n>Player permissions</summary><p data-i18n class="field-help">Use Klei user IDs, one per line. Admins can use the in-game console. Whitelisted players can bypass the join password; this is not an exclusive allowlist.</p><div id="player-candidates"></div><p class="field-help" data-i18n>Choose a candidate to add an ID below, then save settings. Names and imported IDs are hints; verify the account before granting permissions. New joins appear automatically.</p><div class="form-grid">${ids('admins','Administrators (OP)')}${ids('banned','Banned players')}${ids('whitelist','Whitelisted players')}</div></details><div class="form-actions"><button data-i18n type="submit" class="button primary">Save settings</button><span data-i18n class="muted">Changes take effect on the next start.</span></div>`;
+  $('#settings-form').innerHTML = `<div class="form-grid">${input('name','World name')}${input('description','Description')}${input('password','Join password','password')}<label data-i18n>Klei cluster token<input name="token" type="password" autocomplete="off" data-i18n-placeholder placeholder="${w.has_token ? 'Token saved · leave blank to keep' : 'Paste your Klei token'}"></label><label data-i18n>Game mode<select name="game_mode">${['survival','endless','wilderness'].map(mode => `<option data-i18n value="${mode}" ${mode === w.game_mode ? 'selected' : ''}>${mode}</option>`).join('')}</select></label><label data-i18n>Player slots<input type="number" min="1" max="64" name="max_players" value="${w.max_players}"></label></div><div class="checks">${check('caves','Include caves')}${check('pause_when_empty','Pause when empty')}${check('pvp','Allow PvP')}${check('autostart','Start this world at boot')}</div><details><summary data-i18n>World generation & in-game snapshots</summary><p data-i18n class="field-help">Use JSON overrides. Existing terrain will not regenerate; create a new world for a new layout.</p><div class="form-grid">${json('master_overrides','Surface overrides')}${json('caves_overrides','Caves overrides')}<label data-i18n>In-game save snapshots<input type="number" name="snapshots" min="1" max="50" value="${w.snapshots}"></label></div></details><details><summary data-i18n>Player permissions</summary><p data-i18n class="field-help">Add Klei IDs below, one per line. New players appear automatically.</p><div id="player-candidates"></div><details class="help-disclosure"><summary data-i18n>About player permissions</summary><p data-i18n>Admins can use the game console. Whitelisted players bypass the password; other players can still join. Verify imported account hints before granting permissions.</p></details><div class="form-grid">${ids('admins','Administrators (OP)')}${ids('banned','Banned players')}${ids('whitelist','Whitelisted players')}</div></details><div class="form-actions"><button data-i18n type="submit" class="button primary">Save settings</button></div>`;
   I18n.bind($('#settings-form'));
   renderPlayers();
 }
@@ -207,7 +218,7 @@ function captureMods() {
   });
 }
 function renderMods() {
-  $('#mods-list').innerHTML = mods.map((mod, index) => `<article class="mod-row" data-index="${index}"><div class="mod-heading"><label class="checkbox"><input type="checkbox" ${mod.enabled ? 'checked' : ''}>${h('Workshop {id}', {id: mod.id})}</label><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.id}" target="_blank" rel="noreferrer" data-i18n>View ↗</a><button class="icon-button remove-mod" data-index="${index}" aria-label="Remove mod ${mod.id}" data-i18n-aria-label="${escapeHTML(JSON.stringify(msg('Remove mod {id}', {id: mod.id})))}">×</button></div><label data-i18n>Configuration options (JSON)<textarea class="code-input" rows="3">${escapeHTML(JSON.stringify(mod.options,null,2))}</textarea></label></article>`).join('') || '<div data-i18n class="quiet-empty">A world in its original form. Add your first mod below.</div>';
+  $('#mods-list').innerHTML = mods.map((mod, index) => `<article class="mod-row" data-index="${index}"><div class="mod-heading"><label class="checkbox"><input type="checkbox" ${mod.enabled ? 'checked' : ''}>${h('Workshop {id}', {id: mod.id})}</label><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.id}" target="_blank" rel="noreferrer" data-i18n>View ↗</a><button class="icon-button remove-mod" data-index="${index}" aria-label="Remove mod ${mod.id}" data-i18n-aria-label="${escapeHTML(JSON.stringify(msg('Remove mod {id}', {id: mod.id})))}">×</button></div><details><summary data-i18n>Configuration options (JSON)</summary><label><span class="sr-only" data-i18n>Configuration options (JSON)</span><textarea class="code-input" rows="4">${escapeHTML(JSON.stringify(mod.options,null,2))}</textarea></label></details></article>`).join('') || '<div data-i18n class="quiet-empty">No mods added.</div>';
   I18n.bind($('#mods-list'));
 }
 function renderPlayers() {
@@ -242,7 +253,7 @@ async function loadCharacters() {
 }
 function renderCharacters() {
   const select = $('#character-source'), previous = select.value;
-  select.innerHTML = `<option value="" data-i18n>Choose a saved character</option>` + characterRows.map(c => `<option value="${escapeHTML(c.path)}">${escapeHTML(t(c.shard === 'Master' ? 'Surface' : 'Caves') + ' · ' + (c.character || c.folder) + ' · ' + c.folder + ' / ' + c.snapshot + ' · ' + c.session)}</option>`).join('');
+  select.innerHTML = `<option value="" data-i18n>Choose a saved character</option>` + characterRows.map(c => `<option value="${escapeHTML(c.path)}">${escapeHTML(t(c.shard === 'Master' ? 'Surface' : 'Caves') + ' · ' + (c.character || c.folder) + ' · ' + c.folder + ' / ' + c.snapshot)}</option>`).join('');
   if (previous && [...select.options].some(option => option.value === previous)) select.value = previous;
   else if (characterRows.length === 1) select.value = characterRows[0].path;
   I18n.bind(select);
@@ -262,8 +273,8 @@ function renderDestinations() {
   select.disabled = !targets.length || Boolean(state?.busy);
   $('#character-steps').hidden = !source || targets.length > 0;
   $('#character-identity').hidden = !source?.userid;
-  if (source?.userid) I18n.text('#character-identity', source.identity_source === 'saved_log' ? 'A saved log associates this folder with {userid}. Try joining with this account first. If your character loads, recovery is unnecessary.' : 'This folder has an account hint for {userid}. Verify it by joining the world.', {userid:source.userid});
-  I18n.text('#character-info', !characterRows.length ? 'No character snapshots found. Include the complete shard save folders in your ZIP.' : !source ? 'Choose the original saved character first.' : !targets.length ? 'Only the original character is saved here. A known Klei account is not a separate character save, so there is nothing to copy into yet.' : 'Choose the destination save created by your online join. Recovery copies into that exact folder. Account labels are hints; no character is assigned automatically.');
+  if (source?.userid) I18n.text('#character-identity', source.identity_source === 'saved_log' ? 'Saved account hint: {userid}. Try joining first; recovery may not be needed.' : 'This folder has an account hint for {userid}. Verify it by joining the world.', {userid:source.userid});
+  I18n.text('#character-info', !characterRows.length ? 'No character snapshots found. Include the complete shard save folders in your ZIP.' : !source ? 'Choose the original saved character first.' : !targets.length ? 'No destination save yet. Join online and save a temporary character first.' : 'Choose the temporary character to replace. Verify the account before recovering.');
   updateRecoveryButton();
 }
 async function loadBackups() {
@@ -271,7 +282,7 @@ async function loadBackups() {
   const id = selected;
   const {backups} = await api('/worlds/' + id + '/backups');
   if (id !== selected) return;
-  $('#backup-list').innerHTML = backups.length ? `<div class="table-wrap"><table><thead><tr><th data-i18n>BACKUP</th><th data-i18n>CREATED</th><th data-i18n>SIZE</th><th></th></tr></thead><tbody>${backups.map(backup => `<tr><td><strong>${escapeHTML(backup.label_i18n ? t(backup.label_i18n) : backup.label)}</strong><small>${backup.id}</small></td><td>${date(backup.created_at)}</td><td>${backup.size_mb} MB</td><td class="table-actions"><button class="button restore-backup" data-snapshot="${backup.id}" data-i18n>Restore backup</button><button class="icon-button delete-backup" data-snapshot="${backup.id}" data-i18n-aria-label aria-label="Delete backup">×</button></td></tr>`).join('')}</tbody></table></div>` : '<div data-i18n class="quiet-empty">No backups yet. Save a moment you can come back to.</div>';
+  $('#backup-list').innerHTML = backups.length ? `<div class="table-wrap"><table><thead><tr><th data-i18n>BACKUP</th><th data-i18n>CREATED</th><th data-i18n>SIZE</th><th></th></tr></thead><tbody>${backups.map(backup => `<tr><td><strong>${escapeHTML(backup.label_i18n ? t(backup.label_i18n) : backup.label)}</strong></td><td data-label="${escapeHTML(t('CREATED'))}">${date(backup.created_at)}</td><td data-label="${escapeHTML(t('SIZE'))}">${backup.size_mb} MB</td><td class="table-actions"><button class="button restore-backup" data-snapshot="${backup.id}" data-i18n>Restore backup</button><button class="icon-button delete-backup" data-snapshot="${backup.id}" data-i18n-aria-label aria-label="Delete backup">×</button></td></tr>`).join('')}</tbody></table></div>` : '<div data-i18n class="quiet-empty">No backups yet.</div>';
   I18n.bind($('#backup-list'));
 }
 async function loadLogs() {
@@ -314,11 +325,11 @@ document.addEventListener('click', async event => {
     if (target.id === 'logout') { await api('/logout','POST',{}); location.assign('/'); }
     if (target.dataset.action) {
       const action = target.dataset.action, url = worldURL();
-      if (action === 'backup') confirmAction('Save this moment', 'A running world will save, stop briefly, and restart after the backup.', 'Backup name', t('Manual backup'), label => queued(url + '/actions/backup','POST',{label}));
+      if (action === 'backup') confirmAction('Create backup', 'A running world will save, stop briefly, and restart after the backup.', 'Backup name', t('Manual backup'), label => queued(url + '/actions/backup','POST',{label}));
       else if (['stop','restart'].includes(action)) confirmAction(action === 'stop' ? 'Stop this world?' : 'Restart this world?', 'Both shards will save and connected players will disconnect.', '', '', () => queued(url + '/actions/' + action));
       else await queued(url + '/actions/' + action);
     }
-    if (target.id === 'announce-button') { const url = worldURL(); confirmAction('A word for your survivors', 'Send an in-game announcement to the world.', 'Message', '', message => queued(url + '/actions/announce','POST',{message})); }
+    if (target.id === 'announce-button') { const url = worldURL(); confirmAction('Send announcement', 'Send an in-game announcement to the world.', 'Message', '', message => queued(url + '/actions/announce','POST',{message})); }
     if (target.id === 'delete-world') { const url = worldURL(); confirmAction('Archive this world?', msg('Stop the world first. Type “{name}” to confirm. World files and a backup are kept on disk.', {name: world().name}), 'World name', '', confirmation => queued(url,'DELETE',{confirmation})); }
     if (target.matches('.restore-backup')) { const url = worldURL(); confirmAction('Restore this backup?', msg('This replaces world progress and disconnects players. A safety backup is made first. Type “{name}” to continue.', {name: world().name}), 'World name', '', confirmation => queued(url + '/backups/' + target.dataset.snapshot + '/restore','POST',{confirmation})); }
     if (target.matches('.delete-backup')) { const url = worldURL(); confirmAction('Delete this backup?', 'This backup will be permanently removed.', '', '', () => queued(url + '/backups/' + target.dataset.snapshot,'DELETE',{})); }
@@ -329,7 +340,7 @@ document.addEventListener('click', async event => {
       input.value = ids.join('\n');
       toast('ID added to the form. Save settings to apply it.');
     }
-    if (target.dataset.matchCharacter) { await setTab('backups'); $('#character-source').value = target.dataset.matchCharacter; renderDestinations(); $('#character-source').focus(); }
+    if (target.dataset.matchCharacter) { await setTab('backups'); $('#character-recovery').open = true; $('#character-source').value = target.dataset.matchCharacter; renderDestinations(); $('#character-source').focus(); }
     if (target.id === 'refresh-characters') await loadCharacters();
     if (target.id === 'recover-character') {
       const url = worldURL(), source = $('#character-source').value, destination = $('#character-account').value;
