@@ -98,4 +98,4 @@ class Archives:
             self._guard(path)
             if path.exists():
                 shutil.rmtree(path)
-        return {"message": "Archived world, backups, and logs permanently deleted."}
+        return {"world_name": entry["name"], "message": "Archived world, backups, and logs permanently deleted."}

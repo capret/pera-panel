@@ -80,6 +80,12 @@ For HTTPS access, adapt [deploy/nginx.conf.example](deploy/nginx.conf.example). 
 
 Public binding uses HTTP until you configure a TLS reverse proxy; use HTTPS or the SSH tunnel when sending credentials over an untrusted network.
 
+## Navigation and activity
+
+The **Server overview / 服务器概览** at `/overview` contains host resources, all worlds, and panel-wide activity. Each world has direct routes: `/worlds/<id>/overview`, `/settings`, `/mods`, `/backups`, and `/logs` (the last four share the same `/worlds/<id>` prefix). Tabs support bookmarks, page reloads, and browser Back/Forward. Archived worlds are managed at `/archives`.
+
+New jobs keep their world ID and name, including failed jobs and archive deletion. A world's overview shows only its own jobs. Older history without a world ID remains visible on the server overview; it is never guessed to belong to the currently selected world.
+
 ## Network ports
 
 Automatic setup installs UFW if needed, adds the panel/game rules and detected/configured SSH ports, then enables UFW. Existing rules and default policies are retained; no firewall reset is performed. Enabling an inactive UFW applies its existing policies to other services too, so use `--firewall manual` on a host whose firewall you manage yourself. Loopback panel binds do not add a public panel rule. Port changes add the new rule without deleting older rules, which may serve other applications.
@@ -198,6 +204,10 @@ If joining still creates a new character, use **Backups & rollback → Recover a
 4. A **Before character recovery** backup is created, then the selected character files replace the destination folder. The original folder is kept. Start the world and verify the character. Repeat for the other shard if it has separate character data; this operation does not change shard migration routing.
 
 This is explicit character-file recovery, not an automatic offline-to-online world converter. The panel does not rewrite account caches, guess encoded IDs, merge external `client_save` data, or alter mod-specific ownership records. If no destination appears, check that the online character has actually been created and saved in the same shard and session, stop the world, then refresh the character list. Account names are display hints; the operation copies into the explicitly selected existing folder. Recovery can be reversed by restoring its safety backup. Synthetic filesystem/console tests verify the workflow; matching a real offline save and its mod data still requires an in-game check.
+
+A destination is a second character save folder in the same shard and session, not merely a known Klei account. If the imported ZIP only contains the original character, the panel disables recovery and shows steps to join and check it. If the original loads, no recovery is needed. If character selection appears, create a temporary character, leave, stop the world, and refresh before choosing that new save as the destination.
+
+Adjacent `Resuming user` and ownership lines in saved/imported logs can provide an account hint for an encoded folder. These hints require a matching authenticated ID and timestamp, are scoped to the exact shard/session/path, and never grant permissions or create a destination automatically. New imports retain these hints; existing worlds can discover them from their current shard log or live game output. Existing imports whose original log was not retained may have no historical hint. Their actual character files are still shown.
 
 ## Graceful shutdown
 

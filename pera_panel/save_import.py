@@ -10,7 +10,7 @@ import zlib
 
 from .storage import PanelError
 from .lua_settings import read_mods
-from .players import AUTHENTICATED, FOLDER, SESSION, SNAPSHOT
+from .players import FOLDER, SESSION, SNAPSHOT, players_from_log
 
 MAX_UPLOAD_BYTES = 256 * 1024**2
 UPLOAD_REQUEST_LIMIT = MAX_UPLOAD_BYTES + 1024**2  # Multipart envelope allowance.
@@ -109,7 +109,7 @@ def inspect_archive(archive, inherit_mods):
                          "For Steam Cloud saves, extract Master.zip and Caves.zip into those shard folders first.")
     prefix = candidates.pop()
     selected, shards, ids, mod_files = [], set(), {}, {}
-    formats, players = {}, {}
+    formats, players, character_links = {}, {}, []
     for member, parts in entries:
         if parts[:len(prefix)] != prefix:
             continue
@@ -143,10 +143,9 @@ def inspect_archive(archive, inherit_mods):
                         raise PanelError("An uploaded shard ID is invalid.")
                     ids[relative[0]] = identifier
             elif relative[1:] == ("server_log.txt",) and not member.is_dir() and member.file_size <= 2 * 1024**2:
-                for output in archive.read(member).decode("utf-8", errors="replace").splitlines():
-                    match = AUTHENTICATED.fullmatch(output)
-                    if match and len(players) < 1000:
-                        players[match[1]] = match[2][:100]
+                names, links = players_from_log(archive.read(member).decode("utf-8", errors="replace").splitlines(), relative[0])
+                players.update(names)
+                character_links.extend(links)
     for shard in shards:
         if not any(relative[:3] == (shard, "save", "session") and len(relative) >= 5
                    and member.file_size > 0 and not relative[-1].endswith(".meta")
@@ -163,7 +162,8 @@ def inspect_archive(archive, inherit_mods):
         raw = {folder.startswith(("KU_", "OU_")) for folder in folders}
         if len(raw) == 1:
             formats[shard] = not raw.pop()
-    metadata = {"caves": "Caves" in shards, "shard_ids": ids, "encode_user_path": formats, "players": players}
+    metadata = {"caves": "Caves" in shards, "shard_ids": ids, "encode_user_path": formats,
+                "players": players, "character_links": character_links}
     if inherit_mods:
         settings = [mod_files[shard] for shard in sorted(shards) if shard in mod_files]
         if len(settings) == 2 and settings[0] != settings[1]:

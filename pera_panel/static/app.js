@@ -4,7 +4,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 const {t, descriptor: msg} = I18n;
 const h = (key, params = {}) => `<span data-i18n-message="${escapeHTML(JSON.stringify(msg(key, params)))}">${escapeHTML(t(key, params))}</span>`;
 let state = null, selected = null, currentTab = 'overview', mods = [], confirmCallback = null, polling = false;
-let importTarget = null, uploading = false;
+let importTarget = null, uploading = false, currentPage = 'server';
 let archivedWorlds = [], archivesLoading = false;
 let playerWorld = null, playerRows = [], characterRows = [], characterWorld = null, playerPolling = false, playerPollAt = 0;
 const seenJobs = new Set();
@@ -13,7 +13,7 @@ const csrf = $('meta[name="csrf-token"]').content;
 async function api(path, method = 'GET', data) {
   const response = await fetch('/api' + path, {method, headers: {'Content-Type':'application/json', 'X-CSRF-Token':csrf}, ...(data !== undefined ? {body:JSON.stringify(data)} : {})});
   const result = await response.json();
-  if (response.status === 401) { location.assign('/'); throw new I18n.Error('Please sign in.'); }
+  if (response.status === 401) { location.reload(); throw new I18n.Error('Please sign in.'); }
   if (!response.ok) throw new I18n.Error(I18n.message(result.error_i18n) || result.error || 'The request failed.');
   return result;
 }
@@ -44,45 +44,63 @@ function confirmAction(title, description, label, value, callback) {
   confirmCallback = callback;
   $('#confirm-dialog').showModal();
 }
-function setTab(tab) {
-  currentTab = tab;
-  document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
-  document.querySelectorAll('.tab-panel').forEach(panel => { panel.hidden = panel.id !== 'tab-' + tab; });
-  if (tab === 'backups') { loadBackups().catch(error => toast(I18n.error(error), true)); loadCharacters().catch(error => toast(I18n.error(error), true)); }
-  if (tab === 'settings') loadCharacters().catch(error => toast(I18n.error(error), true));
-  if (tab === 'logs') loadLogs().catch(error => toast(I18n.error(error), true));
+function routeFor(path) {
+  const match = path.match(/^\/worlds\/([a-f0-9]{12})\/(overview|settings|mods|backups|logs)\/?$/);
+  if (match) return {page:'world', id:match[1], tab:match[2], path:`/worlds/${match[1]}/${match[2]}`};
+  return path === '/archives' ? {page:'archives',id:null,tab:'overview',path:'/archives'} : {page:'server',id:null,tab:'overview',path:'/overview'};
 }
-function selectWorld(id) {
-  selected = id;
-  playerWorld = null; characterWorld = null; playerRows = []; characterRows = []; playerPollAt = 0;
-  renderCharacters();
-  localStorage.setItem('pera-world', id);
+async function navigate(path, {replace = false} = {}) {
+  const route = routeFor(path), previous = selected;
+  if (location.pathname !== route.path) history[replace ? 'replaceState' : 'pushState']({}, '', route.path);
+  currentPage = route.page; selected = route.id; currentTab = route.tab;
+  if (state && selected && !world()) { await navigate('/overview', {replace:true}); toast('World not found.', true); return; }
+  if (previous !== selected) {
+    playerWorld = null; characterWorld = null; playerRows = []; characterRows = []; playerPollAt = 0;
+    renderCharacters(); fillSettings(); mods = structuredClone(world()?.mods || []); renderMods();
+  }
   render();
-  fillSettings();
-  mods = structuredClone(world()?.mods || []);
-  renderMods();
-  setTab(currentTab);
+  if (!state) return;
+  if (currentPage === 'archives' && !state.busy) await loadArchives();
+  if (selected) {
+    if (!state.busy && ['settings','backups'].includes(currentTab)) await loadCharacters();
+    if (currentTab === 'backups') await loadBackups();
+    if (currentTab === 'logs') await loadLogs();
+    await loadPlayers();
+  }
+}
+function setTab(tab) { return selected ? navigate(`/worlds/${selected}/${tab}`) : Promise.resolve(); }
+function selectWorld(id) { return navigate(`/worlds/${id}/overview`); }
+function renderActivity(selector, jobs, global = false) {
+  $(selector).innerHTML = jobs.map(job => `<div class="activity"><span class="activity-icon ${job.state === 'failed' ? 'failed' : ''}">${job.state === 'completed' ? '✓' : job.state === 'failed' ? '!' : '↻'}</span><div><strong>${escapeHTML(t(job.title))}</strong>${global ? `<small>${escapeHTML(job.world_name || state.worlds.find(w => w.id === job.world_id)?.name || job.world_id || t('Panel / legacy activity'))}</small>` : ''}<small>${escapeHTML(t(I18n.message(job.error_i18n) || job.error || job.state))} · ${date(job.created_at)}</small></div></div>`).join('') || `<p class="muted quiet-empty">${h('No activity for this view yet.')}</p>`;
+  I18n.bind($(selector));
 }
 function render() {
   if (!state) return;
   const item = world();
   renderArchives();
   $('#install-notice').hidden = state.game_installed;
-  $('#empty-state').hidden = state.worlds.length > 0;
+  $('#empty-state').hidden = currentPage !== 'server' || state.worlds.length > 0;
+  $('#server-overview').hidden = currentPage !== 'server';
+  $('#server-metrics').hidden = currentPage !== 'server';
+  $('#archives-page').hidden = currentPage !== 'archives';
+  $('#world-state').hidden = !item;
   $('#world-content').hidden = !item;
   $('#world-actions').hidden = !item;
   $('#world-list').innerHTML = state.worlds.map(w => `<button class="world-item ${w.id === selected ? 'selected' : ''}" data-world="${w.id}"><span class="world-glyph">◈</span><span>${escapeHTML(w.name)}<small>${t(w.caves ? 'Surface + caves' : 'Surface only')}</small></span><i class="world-dot ${w.runtime.state === 'running' ? 'online' : ''}"></i></button>`).join('');
-  $('#world-name').textContent = item?.name || t('World overview');
-  $('#world-description').textContent = item?.description || t('Build a camp. Bring your friends. Keep the fire going.');
-  $('#breadcrumb-world').textContent = item?.name || t('Overview');
+  $('#world-name').textContent = item?.name || t(currentPage === 'archives' ? 'Archived worlds' : 'Server overview');
+  $('#world-description').textContent = item ? item.description || t('Build a camp. Bring your friends. Keep the fire going.') : t(currentPage === 'archives' ? 'Manage archived worlds and reclaim disk space.' : 'Host resources, all worlds, and panel activity.');
+  document.title = (item ? item.name + ' · ' + t({overview:'World overview',settings:'World settings',mods:'Workshop mods',backups:'Backups & rollback',logs:'Live logs'}[currentTab]) : t(currentPage === 'archives' ? 'Archived worlds' : 'Server overview')) + ' · Pera Panel';
+  $('#breadcrumb-world').textContent = item ? item.name + ' / ' + t({overview:'World overview',settings:'World settings',mods:'Workshop mods',backups:'Backups & rollback',logs:'Live logs'}[currentTab]) : t(currentPage === 'archives' ? 'Archived worlds' : 'Server overview');
+  document.querySelectorAll('[data-tab]').forEach(link => { link.classList.toggle('active', link.dataset.tab === currentTab); link.setAttribute('aria-current', link.dataset.tab === currentTab ? 'page' : 'false'); link.href = selected ? `/worlds/${selected}/${link.dataset.tab}` : '/overview'; });
+  document.querySelectorAll('.tab-panel').forEach(panel => { panel.hidden = panel.id !== 'tab-' + currentTab; });
   const runtime = item?.runtime;
   $('#native-rollback').disabled = Boolean(state.busy) || runtime?.state !== 'running';
   $('#rollback-count').max = item?.snapshots || 50;
-  $('#recover-character').disabled = Boolean(state.busy) || !item || ['running','degraded'].includes(runtime?.state);
+  updateRecoveryButton();
   $('#refresh-characters').disabled = Boolean(state.busy);
-  $('#metric-status').textContent = runtime ? t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[runtime.state]) : t('No world yet');
-  $('#metric-status').classList.toggle('green', runtime?.state === 'running');
-  $('#metric-status-note').textContent = runtime?.uptime_seconds ? t('Up {duration} · {memory} MB game memory', {duration: duration(runtime.uptime_seconds), memory: runtime.memory_mb}) : t(item ? 'Ready when you are' : 'Create a world to begin');
+  $('#world-state').textContent = runtime ? t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[runtime.state]) + (runtime.uptime_seconds ? ' · ' + duration(runtime.uptime_seconds) : '') : '';
+  $('#metric-status').textContent = state.worlds.length;
+  $('#metric-status-note').textContent = t('{count} running worlds', {count:state.worlds.filter(w => ['running','degraded'].includes(w.runtime.state)).length});
   $('#metric-cpu').textContent = state.host.cpu_percent + '%';
   $('#metric-memory').textContent = state.host.memory_used_gb + ' GB';
   $('#metric-memory-note').textContent = t('of {total} GB · {percent}% used', {total: state.host.memory_total_gb, percent: state.host.memory_percent});
@@ -96,8 +114,10 @@ function render() {
     const active = runtime && ['running','degraded'].includes(runtime.state);
     button.disabled = Boolean(busy) || !item || (['save','announce','stop'].includes(action) && !active) || (action === 'start' && active);
   });
-  $('#activity-list').innerHTML = state.jobs.slice(0, 5).map(job => `<div class="activity"><span class="activity-icon ${job.state === 'failed' ? 'failed' : ''}">${job.state === 'completed' ? '✓' : job.state === 'failed' ? '!' : '↻'}</span><div><strong>${escapeHTML(t(job.title))}</strong><small>${escapeHTML(t(I18n.message(job.error_i18n) || job.error || job.state))} · ${date(job.created_at)}</small></div></div>`).join('') || `<p class="muted quiet-empty">${h('Your world’s story will show up here.')}</p>`;
-  if (!item) { I18n.bind($('#activity-list')); return; }
+  renderActivity('#activity-list', state.jobs.filter(job => selected && job.world_id === selected).slice(0, 5));
+  renderActivity('#server-activity-list', state.jobs.slice(0, 10), true);
+  $('#server-worlds').innerHTML = state.worlds.map(w => `<button class="server-world-row" data-world="${w.id}"><span><strong>${escapeHTML(w.name)}</strong><small>${escapeHTML(t(w.caves ? 'Surface + caves' : 'Surface only'))}</small></span><span class="status-tag">${escapeHTML(t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[w.runtime.state]))}</span></button>`).join('') || `<p class="quiet-empty">${h('No world yet')}</p>`;
+  if (!item) return;
   $('#mod-count').textContent = item.mods.filter(mod => mod.enabled).length;
   $('#max-players').textContent = t('{count} survivors', {count: item.max_players});
   $('#game-mode').textContent = t(item.game_mode);
@@ -113,28 +133,25 @@ async function refresh() {
   polling = true;
   try {
     const first = !state;
-    const previousSelected = selected;
     state = await api('/status');
     $('#connection-error').hidden = true;
-    if (!world()) selected = state.worlds.find(w => w.id === localStorage.getItem('pera-world'))?.id || state.worlds[0]?.id || null;
+    if (first) await navigate(location.pathname, {replace:true});
+    else if (selected && !world()) await navigate('/overview', {replace:true});
     for (const job of state.jobs) {
       if (['failed','completed'].includes(job.state) && !seenJobs.has(job.id)) {
         seenJobs.add(job.id);
         if (!first) {
           toast(I18n.message(job.error_i18n) || job.error || job.result?.message_i18n || job.result?.message || msg('{job} completed.', {job: msg(job.title)}), job.state === 'failed');
-          if (job.result?.world_id) selected = job.result.world_id;
-          if (['Create world','Roll back world','Restore backup','Import local save'].includes(job.title)) { fillSettings(); mods = structuredClone(world()?.mods || []); renderMods(); playerPollAt = 0; }
-          if (currentTab === 'backups') { await loadBackups(); await loadCharacters(); }
-          if ($('#archives-dialog').open && !state.busy) await loadArchives();
+          if (job.title === 'Create world' && job.result?.world_id) await selectWorld(job.result.world_id);
+          if (job.world_id === selected) {
+            if (['Create world','Restore backup','Import local save'].includes(job.title)) { fillSettings(); mods = structuredClone(world()?.mods || []); renderMods(); playerPollAt = 0; }
+            if (currentTab === 'backups' && !state.busy) { await loadBackups(); await loadCharacters(); }
+          }
+          if (currentPage === 'archives' && !state.busy) await loadArchives();
         }
       }
     }
-    const changedWorld = previousSelected !== selected;
-    if (changedWorld) { playerWorld = null; characterWorld = null; playerRows = []; characterRows = []; playerPollAt = 0; renderCharacters(); }
     render();
-    if (first || changedWorld) { fillSettings(); mods = structuredClone(world()?.mods || []); renderMods(); }
-    if (changedWorld && currentTab === 'settings') await loadCharacters();
-    if (changedWorld && currentTab === 'backups') { await loadBackups(); await loadCharacters(); }
     if (currentTab === 'logs' && selected) await loadLogs();
     if (selected) await loadPlayers();
   } catch (error) {
@@ -197,9 +214,9 @@ function renderPlayers() {
   const rows = playerWorld === selected ? playerRows : [];
   const candidates = $('#player-candidates');
   if (candidates) {
-    candidates.innerHTML = rows.map(player => `<div class="player-candidate"><div><strong>${escapeHTML(player.name || player.userid)}</strong><small>${escapeHTML(player.userid)} · ${escapeHTML(t(player.sources.includes('join') || player.sources.includes('console') ? 'Seen by this server' : player.sources.includes('save') ? 'Saved player' : player.sources.includes('imported_log') ? 'Imported log' : player.sources.includes('cached_owner') ? 'Cached owner · character unverified' : 'Permission list'))}</small></div><div class="player-permission-actions">${[['admins','Add admin'],['banned','Add ban'],['whitelist','Add whitelist']].map(([key,label]) => `<button type="button" class="button" data-player-id="${escapeHTML(player.userid)}" data-permission="${key}">${h(label)}</button>`).join('')}</div></div>`).join('') || `<p class="muted">${h('No known Klei IDs yet. Import a save or wait for a player to join.')}</p>`;
-    const unknown = characterWorld === selected ? characterRows.filter(c => !rows.some(p => p.userid === c.userid || p.folders?.[c.shard] === c.folder)) : [];
-    candidates.innerHTML += unknown.map(c => `<div class="player-candidate"><div><strong>${escapeHTML(c.character || c.folder)}</strong><small>${escapeHTML(c.folder)} · ${h('Identity not linked')} · ${escapeHTML(t(c.shard === 'Master' ? 'Surface' : 'Caves'))}</small></div><button type="button" class="button" data-match-character="${escapeHTML(c.path)}">${h('Link a saved character')}</button></div>`).join('');
+    candidates.innerHTML = rows.map(player => `<div class="player-candidate"><div><strong>${escapeHTML(player.name || player.userid)}</strong><small>${escapeHTML(player.userid)} · ${escapeHTML(t(player.sources.includes('join') || player.sources.includes('console') ? 'Seen by this server' : player.sources.includes('save') ? 'Saved player' : player.sources.includes('imported_log') ? 'Saved log' : player.sources.includes('cached_owner') ? 'Cached owner · character unverified' : 'Permission list'))}</small></div><div class="player-permission-actions">${[['admins','Add admin'],['banned','Add ban'],['whitelist','Add whitelist']].map(([key,label]) => `<button type="button" class="button" data-player-id="${escapeHTML(player.userid)}" data-permission="${key}">${h(label)}</button>`).join('')}</div></div>`).join('') || `<p class="muted">${h('No known Klei IDs yet. Import a save or wait for a player to join.')}</p>`;
+    const saved = characterWorld === selected ? characterRows : [];
+    candidates.innerHTML += saved.map(c => `<div class="player-candidate"><div><strong>${escapeHTML(c.character || c.folder)}</strong><small>${escapeHTML(c.folder)} · ${c.userid ? h(c.identity_source === 'saved_log' ? 'Saved log account: {userid}' : 'Account hint: {userid}', {userid:c.userid}) : h('Identity not linked')} · ${escapeHTML(t(c.shard === 'Master' ? 'Surface' : 'Caves'))}</small></div><button type="button" class="button" data-match-character="${escapeHTML(c.path)}">${h('View saved character')}</button></div>`).join('');
     I18n.bind(candidates);
   }
   renderDestinations();
@@ -226,18 +243,28 @@ async function loadCharacters() {
 function renderCharacters() {
   const select = $('#character-source'), previous = select.value;
   select.innerHTML = `<option value="" data-i18n>Choose a saved character</option>` + characterRows.map(c => `<option value="${escapeHTML(c.path)}">${escapeHTML(t(c.shard === 'Master' ? 'Surface' : 'Caves') + ' · ' + (c.character || c.folder) + ' · ' + c.folder + ' / ' + c.snapshot + ' · ' + c.session)}</option>`).join('');
-  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  if (previous && [...select.options].some(option => option.value === previous)) select.value = previous;
+  else if (characterRows.length === 1) select.value = characterRows[0].path;
   I18n.bind(select);
   renderDestinations();
+}
+function updateRecoveryButton() {
+  const hasDestination = Boolean($('#character-source').value && $('#character-account').value);
+  $('#recover-character').disabled = Boolean(state?.busy) || !world() || !hasDestination || ['running','degraded'].includes(world()?.runtime.state);
 }
 function renderDestinations() {
   const source = characterWorld === selected ? characterRows.find(c => c.path === $('#character-source').value) : null;
   const targets = source ? characterRows.filter(c => c.shard === source.shard && c.session === source.session && c.path !== source.path) : [];
   const select = $('#character-account'), previous = select.value;
-  select.innerHTML = `<option value="" data-i18n>Choose a destination save</option>` + targets.map(c => `<option value="${escapeHTML(c.path)}">${escapeHTML((c.userid || t('Unidentified account')) + ' · ' + (c.character ? c.character + ' · ' : '') + c.folder + ' / ' + c.snapshot)}</option>`).join('');
+  select.innerHTML = `<option value="">${escapeHTML(t(targets.length ? 'Choose a destination save' : 'No destination save yet'))}</option>` + targets.map(c => `<option value="${escapeHTML(c.path)}">${escapeHTML((c.userid || t('Unidentified account')) + ' · ' + (c.character ? c.character + ' · ' : '') + c.folder + ' / ' + c.snapshot)}</option>`).join('');
   if ([...select.options].some(option => option.value === previous)) select.value = previous;
   I18n.bind(select);
-  I18n.text('#character-info', !characterRows.length ? 'No character snapshots found. Include the complete shard save folders in your ZIP.' : !source ? 'Choose the original saved character first.' : !targets.length ? 'No other character save exists in this shard and session. Join online, create a temporary character if needed, then stop the world and refresh.' : 'Choose the destination save created by your online join. Recovery copies into that exact folder. Account labels are hints; no character is assigned automatically.');
+  select.disabled = !targets.length || Boolean(state?.busy);
+  $('#character-steps').hidden = !source || targets.length > 0;
+  $('#character-identity').hidden = !source?.userid;
+  if (source?.userid) I18n.text('#character-identity', source.identity_source === 'saved_log' ? 'A saved log associates this folder with {userid}. Try joining with this account first. If your character loads, recovery is unnecessary.' : 'This folder has an account hint for {userid}. Verify it by joining the world.', {userid:source.userid});
+  I18n.text('#character-info', !characterRows.length ? 'No character snapshots found. Include the complete shard save folders in your ZIP.' : !source ? 'Choose the original saved character first.' : !targets.length ? 'Only the original character is saved here. A known Klei account is not a separate character save, so there is nothing to copy into yet.' : 'Choose the destination save created by your online join. Recovery copies into that exact folder. Account labels are hints; no character is assigned automatically.');
+  updateRecoveryButton();
 }
 async function loadBackups() {
   if (!selected) return;
@@ -259,14 +286,16 @@ async function loadLogs() {
   if (atBottom) output.scrollTop = output.scrollHeight;
 }
 document.addEventListener('click', async event => {
+  const link = event.target.closest('a[data-route]');
+  if (link && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) { event.preventDefault(); navigate(link.getAttribute('href')).catch(error => toast(I18n.error(error), true)); return; }
   const target = event.target.closest('button');
   if (!target) return;
   try {
     if (target.matches('.close-dialog')) { target.closest('dialog').close(); return; }
-    if (target.matches('[data-world]')) selectWorld(target.dataset.world);
-    if (target.matches('[data-tab]')) setTab(target.dataset.tab);
+    if (target.matches('[data-world]')) await selectWorld(target.dataset.world);
+    if (target.matches('[data-tab]')) await setTab(target.dataset.tab);
     if (['sidebar-create','add-world','empty-create'].includes(target.id)) $('#create-dialog').showModal();
-    if (target.id === 'open-archives') { $('#archives-dialog').showModal(); await loadArchives(); }
+    if (target.id === 'open-archives') await navigate('/archives');
     if (target.id === 'refresh-archives') await loadArchives();
     if (target.dataset.deleteArchive) {
       const archived = archivedWorlds.find(w => w.id === target.dataset.deleteArchive);
@@ -300,7 +329,7 @@ document.addEventListener('click', async event => {
       input.value = ids.join('\n');
       toast('ID added to the form. Save settings to apply it.');
     }
-    if (target.dataset.matchCharacter) { setTab('backups'); $('#character-source').value = target.dataset.matchCharacter; renderDestinations(); $('#character-source').focus(); }
+    if (target.dataset.matchCharacter) { await setTab('backups'); $('#character-source').value = target.dataset.matchCharacter; renderDestinations(); $('#character-source').focus(); }
     if (target.id === 'refresh-characters') await loadCharacters();
     if (target.id === 'recover-character') {
       const url = worldURL(), source = $('#character-source').value, destination = $('#character-account').value;
@@ -341,6 +370,7 @@ $('#confirm-form').addEventListener('submit', async event => {
 });
 $('#log-shard').addEventListener('change', () => loadLogs().catch(error => toast(I18n.error(error),true)));
 $('#character-source').addEventListener('change', renderDestinations);
+$('#character-account').addEventListener('change', updateRecoveryButton);
 $('#choose-save').addEventListener('click', () => $('#save-zip').click());
 $('#save-zip').addEventListener('change', () => {
   const file = $('#save-zip').files[0];
@@ -380,7 +410,7 @@ $('#import-form').addEventListener('submit', async event => {
         let data;
         try { data = JSON.parse(xhr.responseText); }
         catch { reject(new I18n.Error(xhr.status === 413 ? 'Upload rejected as too large. Check your reverse proxy upload limit.' : 'Unexpected server response. Check Recent activity before retrying.')); return; }
-        if (xhr.status === 401) { location.assign('/'); reject(new I18n.Error('Please sign in again.')); return; }
+        if (xhr.status === 401) { location.reload(); reject(new I18n.Error('Please sign in again.')); return; }
         if (xhr.status < 200 || xhr.status >= 300) reject(new I18n.Error(I18n.message(data.error_i18n) || data.error || 'Upload failed.'));
         else resolve(data);
       };
@@ -399,5 +429,6 @@ document.addEventListener('languagechange', () => {
   render(); renderPlayers(); renderCharacters();
   if (currentTab === 'backups') loadBackups().catch(error => toast(I18n.error(error), true));
 });
+window.addEventListener('popstate', () => navigate(location.pathname, {replace:true}).catch(error => toast(I18n.error(error), true)));
 refresh();
 setInterval(refresh, 4000);

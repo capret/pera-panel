@@ -65,7 +65,7 @@ class Runtime:
         try:
             for output in iter(lambda: process.stdout.readline(65536), ""):
                 try:
-                    self.players.log_line(identifier, output)
+                    self.players.log_line(identifier, output, shard)
                     self._player_response(identifier, shard, output)
                 except (OSError, ValueError):
                     logging.exception("Could not record player discovery")

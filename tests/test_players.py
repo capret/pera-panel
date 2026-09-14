@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pera_panel.players import characters, folder_userid
+from pera_panel.players import characters, folder_userid, players_from_log
 from pera_panel.storage import PanelError, atomic_write
 from test_save_import import local_zip
 from test_web import wait_job
@@ -281,3 +281,61 @@ def test_explicit_destination_rejects_same_folder_traversal_and_other_shard_sess
         service.recover_character(identifier, SOURCE, None, "Camp", destination)
     assert not service.backups(identifier)
     assert (root / TARGET / "0000000011").read_text() == "new character"
+
+
+def resume_log(folder="A7ENCODED1234", userid=USER):
+    return [f"[00:00:26]: Client authenticated: ({userid}) Survivor",
+            f"[00:00:49]: Resuming user: session/{SESSION}/{folder}/0000000010",
+            f"[00:00:49]: User ID\t{userid}\tassigned ownership to entity\t119701 - woodie\t"]
+
+
+def test_saved_log_recognizes_encoded_character_without_moving_or_granting_permissions(service, tmp_path):
+    identifier = service.create({"name": "Camp", "caves": False})["world_id"]
+    path = f"Master/save/session/{SESSION}/A7ENCODED1234"
+    archive = local_zip(tmp_path, caves=False, extra={
+        "Cluster_1/" + path + "/0000000010": "original character bytes",
+        "Cluster_1/" + path + "/0000000010.meta": 'return {character="woodie"}\0',
+        "Cluster_1/Master/server_log.txt": "\n".join(resume_log()),
+    })
+    service.import_save(identifier, archive, "Camp")
+    saved = service.character_list(identifier)
+    assert len(saved) == 1 and saved[0]["userid"] == USER
+    assert saved[0]["identity_source"] == "saved_log" and saved[0]["character"] == "woodie"
+    assert saved[0]["path"] == path
+    assert (service.store.world_path(identifier) / path / "0000000010").read_text() == "original character bytes"
+    assert service.store.get(identifier)["admins"] == []
+
+
+@pytest.mark.parametrize("variant", ["chat", "no-auth", "gap", "clock", "interleaved", "bad-path", "no-timestamp"])
+def test_saved_log_does_not_guess_links_from_ambiguous_or_unrelated_lines(variant):
+    lines = resume_log()
+    if variant == "chat":
+        lines[1] = "[00:00:49]: [Say] (" + USER + ") Player: " + lines[1]
+    elif variant == "no-auth":
+        lines = lines[1:]
+    elif variant == "gap":
+        lines.insert(2, "[00:00:49]: Unrelated output")
+    elif variant == "clock":
+        lines[-1] = lines[-1].replace("00:00:49", "00:00:50")
+    elif variant == "interleaved":
+        lines.insert(2, lines[1].replace("A7ENCODED1234", "A7ANOTHER123"))
+    elif variant == "no-timestamp":
+        lines = [line.split(": ", 1)[1] for line in lines]
+    else:
+        lines[1] = lines[1].replace("A7ENCODED1234", "../../escape")
+    assert players_from_log(lines, "Master")[1] == []
+
+
+def test_existing_server_log_and_live_output_identify_only_the_matching_shard_session(service):
+    identifier, root = setup_characters(service)
+    atomic_write(root / "Master/server_log.txt", "\n".join(resume_log("OU_76561198000000000")))
+    original = next(c for c in service.character_list(identifier) if c["path"] == SOURCE)
+    assert original["userid"] == USER
+    # A different account associated with the same encoded path makes the hint ambiguous.
+    for output in resume_log("OU_76561198000000000", "KU_other123"):
+        service.players.log_line(identifier, output, "Master")
+    original = next(c for c in service.character_list(identifier) if c["path"] == SOURCE)
+    assert original["userid"] is None
+    caves = root / SOURCE.replace("Master/", "Caves/")
+    atomic_write(caves / "0000000010", "cave character")
+    assert next(c for c in service.character_list(identifier) if c["shard"] == "Caves")["userid"] is None

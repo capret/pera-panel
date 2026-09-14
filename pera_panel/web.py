@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 import tempfile
 
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, abort, jsonify, render_template, request, session
 import psutil
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash
@@ -79,11 +79,18 @@ def create_app(config, service=None):
             raise PanelError("Expected a JSON object.")
         return data
 
-    def operation(title, callback):
-        return jsonify(job=service.submit(title, callback)), 202
+    def operation(title, callback, identifier=None):
+        return jsonify(job=service.submit(title, callback, world_id=identifier)), 202
 
     @app.get("/")
-    def index():
+    @app.get("/overview")
+    @app.get("/archives")
+    @app.get("/worlds/<identifier>/<tab>")
+    def index(identifier=None, tab=None):
+        if identifier is not None:
+            if tab not in ("overview", "settings", "mods", "backups", "logs"):
+                abort(404)
+            service.store.world_path(identifier)
         return render_template("index.html" if authenticated() else "login.html",
                                csrf=csrf_token(), version=__version__, translations=translations)
 
@@ -156,38 +163,38 @@ def create_app(config, service=None):
     @app.delete("/api/archived-worlds/<identifier>")
     def delete_archived_world(identifier):
         data = body()
-        return operation("Delete archived world", lambda: service.delete_archived(identifier, data.get("confirmation")))
+        return operation("Delete archived world", lambda: service.delete_archived(identifier, data.get("confirmation")), identifier)
 
     @app.patch("/api/worlds/<identifier>")
     def configure_world(identifier):
         data = body()
-        return operation("Save world settings", lambda: service.configure(identifier, data))
+        return operation("Save world settings", lambda: service.configure(identifier, data), identifier)
 
     @app.delete("/api/worlds/<identifier>")
     def delete_world(identifier):
         data = body()
-        return operation("Archive world", lambda: service.delete(identifier, data.get("confirmation")))
+        return operation("Archive world", lambda: service.delete(identifier, data.get("confirmation")), identifier)
 
     @app.post("/api/worlds/<identifier>/actions/<action>")
     def world_action(identifier, action):
         data = body()
         service.store.get(identifier)
         if action in ("start", "stop", "restart"):
-            return operation(f"{action.title()} world", lambda: getattr(service, action)(identifier))
+            return operation(f"{action.title()} world", lambda: getattr(service, action)(identifier), identifier)
         if action in ("save", "announce"):
             message = line(data.get("message", ""), "Announcement", 300, required=action == "announce")
-            return operation(f"{action.title()} command", lambda: service.runtime.command(identifier, action, message))
+            return operation(f"{action.title()} command", lambda: service.runtime.command(identifier, action, message), identifier)
         if action == "backup":
-            return operation("Create backup", lambda: service.backup(identifier, data.get("label", "Manual backup")))
+            return operation("Create backup", lambda: service.backup(identifier, data.get("label", "Manual backup")), identifier)
         if action == "rollback":
-            return operation("Native rollback", lambda: service.rollback(identifier, data.get("count"), data.get("confirmation")))
+            return operation("Native rollback", lambda: service.rollback(identifier, data.get("count"), data.get("confirmation")), identifier)
         if action == "update-mods":
             def update_mods():
                 service.require_stopped(identifier)
                 if service.runtime.active():
                     raise PanelError("Stop the active world before downloading mods.", 409)
                 service.runtime.update_mods(service.store.get(identifier))
-            return operation("Download Workshop mods", update_mods)
+            return operation("Download Workshop mods", update_mods, identifier)
         raise PanelError("Unknown action.", 404)
 
     @app.get("/api/worlds/<identifier>/players")
@@ -209,7 +216,7 @@ def create_app(config, service=None):
         data = body()
         service.store.get(identifier)
         return operation("Recover character", lambda: service.recover_character(
-            identifier, data.get("source"), data.get("userid"), data.get("confirmation"), data.get("destination")))
+            identifier, data.get("source"), data.get("userid"), data.get("confirmation"), data.get("destination")), identifier)
 
     @app.get("/api/worlds/<identifier>/backups")
     def backups(identifier):
@@ -220,11 +227,11 @@ def create_app(config, service=None):
         data = body()
         if data.get("confirmation") != service.store.get(identifier)["name"]:
             raise PanelError("Type the world name exactly to roll back.")
-        return operation("Restore backup", lambda: service.restore(identifier, snapshot))
+        return operation("Restore backup", lambda: service.restore(identifier, snapshot), identifier)
 
     @app.delete("/api/worlds/<identifier>/backups/<snapshot>")
     def delete_backup(identifier, snapshot):
-        return operation("Delete backup", lambda: service.delete_backup(identifier, snapshot))
+        return operation("Delete backup", lambda: service.delete_backup(identifier, snapshot), identifier)
 
     @app.post("/api/worlds/<identifier>/import-save")
     def import_save(identifier):
@@ -258,7 +265,7 @@ def create_app(config, service=None):
                     return service.import_save(identifier, uploaded, confirmation, inherit_mods == "true")
                 finally:
                     directory.cleanup()
-            result = operation("Import local save", replace_save)
+            result = operation("Import local save", replace_save, identifier)
             temporary = None  # The operation owns cleanup after request file streams close.
             return result
         finally:

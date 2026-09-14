@@ -12,11 +12,47 @@ FOLDER = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 SESSION = re.compile(r"[A-Fa-f0-9]{16}\Z")
 SNAPSHOT = re.compile(r"[0-9]{10}\Z")
 AUTHENTICATED = re.compile(r"^(?:\[[0-9:.]+\]:\s*)?Client authenticated: \((KU_[A-Za-z0-9_-]{4,64})\) (.*)$")
+CHARACTER_PATH = re.compile(r"(?:Master|Caves)/save/session/[A-Fa-f0-9]{16}/[A-Za-z0-9_-]{1,80}\Z")
+RESUMING = re.compile(r"^(?:\[([0-9:.]+)\]:\s*)?Resuming user: session/([A-Fa-f0-9]{16})/([A-Za-z0-9_-]{1,80})/[0-9]{10}\s*$")
+OWNERSHIP = re.compile(r"^(?:\[([0-9:.]+)\]:\s*)?User ID\s+(KU_[A-Za-z0-9_-]{4,64})\s+assigned ownership to entity\s+[0-9]+ - [A-Za-z0-9_]+\s*$")
 MAX_PLAYERS = 1000
 
 
 def clean(value, limit=100):
     return "".join(c for c in value if ord(c) >= 32)[:limit] if isinstance(value, str) else ""
+
+
+class ResumeLinks:
+    """Adjacent game log lines are display hints, never permission grants or recovery targets."""
+    def __init__(self):
+        self.pending = None
+        self.previous_resume = False
+        self.authenticated = set()
+
+    def feed(self, output, shard):
+        output = output.rstrip("\r\n")
+        auth = AUTHENTICATED.fullmatch(output)
+        if auth and len(self.authenticated) < MAX_PLAYERS:
+            self.authenticated.add(auth[1])
+        resumed, owner = RESUMING.fullmatch(output), OWNERSHIP.fullmatch(output)
+        pending = self.pending
+        self.pending = resumed if resumed and not self.previous_resume else None
+        self.previous_resume = bool(resumed)
+        if pending and owner and pending[1] and pending[1] == owner[1] and owner[2] in self.authenticated:
+            return {"userid": owner[2], "character_path": f"{shard}/save/session/{pending[2]}/{pending[3]}"}
+        return None
+
+
+def players_from_log(outputs, shard):
+    players, links, parser = {}, [], ResumeLinks()
+    for output in outputs:
+        match = AUTHENTICATED.fullmatch(output.rstrip("\r\n"))
+        if match and len(players) < MAX_PLAYERS:
+            players[match[1]] = clean(match[2])
+        link = parser.feed(output, shard)
+        if link and len(links) < MAX_PLAYERS:
+            links.append(link)
+    return players, links
 
 
 def folder_userid(folder, known_ids=()):
@@ -84,6 +120,7 @@ class PlayerRegistry:
     def __init__(self, store):
         self.store = store
         self.lock = threading.RLock()
+        self.log_parsers = {}
 
     def _read(self, root):
         path = root / "pera-players.json"
@@ -99,7 +136,10 @@ class PlayerRegistry:
                                     for s in v["sources"])
                             and isinstance(v.get("folders"), dict)
                             and all(shard in ("Master", "Caves") and isinstance(folder, str) and FOLDER.fullmatch(folder)
-                                    for shard, folder in v["folders"].items())}
+                                    for shard, folder in v["folders"].items())
+                            and isinstance(v.get("paths", {}), dict) and len(v.get("paths", {})) <= 128
+                            and all(CHARACTER_PATH.fullmatch(path) and source in ("join", "imported_log")
+                                    for path, source in v.get("paths", {}).items())}
             except (ValueError, UnicodeError):
                 pass
         return {}
@@ -131,21 +171,40 @@ class PlayerRegistry:
                 folder, shard = row.get("folder", ""), row.get("shard", "Master")
                 if isinstance(folder, str) and FOLDER.fullmatch(folder) and shard in ("Master", "Caves"):
                     player["folders"][shard] = folder
+                character_path = row.get("character_path")
+                if isinstance(character_path, str) and CHARACTER_PATH.fullmatch(character_path) and source in ("join", "imported_log"):
+                    paths = player.setdefault("paths", {})
+                    if character_path in paths or len(paths) < 128:
+                        paths[character_path] = source
                 if source == "join":
                     player["last_seen"] = datetime.now(timezone.utc).isoformat()
             if json.dumps(data, sort_keys=True) != before:
                 write_json(root / "pera-players.json", data)
 
-    def log_line(self, identifier, output):
+    def log_line(self, identifier, output, shard="Master"):
         match = AUTHENTICATED.fullmatch(output.rstrip("\r\n"))
         if match:
             self.record(identifier, match[1], name=match[2])
+        with self.lock:
+            key = (identifier, shard)
+            if key not in self.log_parsers:
+                if len(self.log_parsers) >= 100:
+                    self.log_parsers.pop(next(iter(self.log_parsers)))
+                self.log_parsers[key] = ResumeLinks()
+            link = self.log_parsers[key].feed(output, shard)
+            if link:
+                self.record_many(identifier, [{**link, "source": "join"}])
 
     def discover(self, identifier):
         """Run on import and explicit refresh, not on every status poll."""
         root = self.store.world_path(identifier)
         rows = []
         for shard in ("Master", "Caves"):
+            log = root / shard / "server_log.txt"
+            if log.is_file() and not log.is_symlink() and not log.parent.is_symlink() and log.stat().st_size <= 2 * 1024**2:
+                names, links = players_from_log(log.read_text(encoding="utf-8", errors="replace").splitlines(), shard)
+                rows.extend({"userid": userid, "name": name, "source": "imported_log"} for userid, name in names.items())
+                rows.extend({**link, "source": "imported_log"} for link in links)
             path = root / shard / "save" / "cached_userid"
             if path.is_file() and not any(p.is_symlink() for p in (root / shard, path.parent, path)) \
                     and path.stat().st_size <= 512:
@@ -156,6 +215,7 @@ class PlayerRegistry:
                 except UnicodeError:
                     pass
         with self.lock:
+            self.record_many(identifier, rows)
             data = self._read(root)
             world = self.store.get(identifier)
             known = {p["userid"] for p in data.values() if set(p["sources"]) - {"save"}}
@@ -182,8 +242,10 @@ class PlayerRegistry:
                     # recovery always validates the user's explicitly selected destination on disk.
                     matches = [p["userid"] for p in data.values() if "console" in p["sources"]
                                and p["folders"].get(character["shard"]) == character["folder"]]
-                    if len(matches) == 1:
+                    matches.extend(p["userid"] for p in data.values() if character["path"] in p.get("paths", {}))
+                    if len(set(matches)) == 1:
                         character["userid"] = matches[0]
+                        character["identity_source"] = "saved_log"
             self.record_many(identifier, rows)
             return saved
 

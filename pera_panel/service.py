@@ -41,12 +41,20 @@ class Service:
     def _persist_jobs(self):
         write_json(self.jobs_file, self.jobs[-50:])
 
-    def submit(self, title, operation):
+    def submit(self, title, operation, *, world_id=None):
         with self.lock:
             if self.closing or self.busy:
                 raise PanelError("Another operation is in progress. Wait for it to finish.", 409)
             job = {"id": uuid.uuid4().hex, "title": title, "state": "queued",
-                   "created_at": datetime.now(timezone.utc).isoformat(), "error": None, "result": None}
+                   "created_at": datetime.now(timezone.utc).isoformat(), "error": None, "result": None,
+                   "world_id": world_id, "world_name": None}
+            if world_id:
+                self.store.world_path(world_id)
+                try:
+                    job["world_name"] = self.store.get(world_id)["name"]
+                except PanelError as exc:
+                    if exc.status != 404:
+                        raise
             self.jobs = self.jobs[-49:] + [job]
             self.busy = job["id"]
             self._persist_jobs()
@@ -61,6 +69,11 @@ class Service:
             result = operation()
             with self.lock:
                 job.update(state="completed", result=result)
+                if not job.get("world_id") and isinstance(result, dict) and result.get("world_id"):
+                    job["world_id"] = result["world_id"]
+                    job["world_name"] = self.store.get(result["world_id"])["name"]
+                if isinstance(result, dict) and result.get("world_name"):
+                    job["world_name"] = result["world_name"]
         except Exception as exc:
             logging.exception("Operation failed: %s", job["title"])
             with self.lock:
@@ -73,9 +86,10 @@ class Service:
                 self.busy = None
                 self._persist_jobs()
 
-    def job_list(self):
+    def job_list(self, identifier=None):
         with self.lock:
-            return [dict(job) for job in reversed(self.jobs)]
+            return [dict(job) for job in reversed(self.jobs)
+                    if identifier is None or job.get("world_id") == identifier]
 
     def require_stopped(self, identifier):
         if self.runtime.active(identifier):
@@ -240,6 +254,8 @@ class Service:
                     self.players.discover(identifier)
                     self.players.record_many(identifier, [{"userid": userid, "name": name, "source": "imported_log"}
                                                           for userid, name in metadata["players"].items()])
+                    self.players.record_many(identifier, [{**link, "source": "imported_log"}
+                                                          for link in metadata["character_links"]])
                 except Exception:
                     if root.exists():
                         shutil.rmtree(root)
@@ -324,11 +340,11 @@ class Service:
             identifier = json.loads(resume_file.read_text()).get("world_id")
             resume_file.unlink()
             if identifier and any(w["id"] == identifier for w in self.store.all()):
-                self.submit("Resume world after maintenance", lambda: self.start(identifier))
+                self.submit("Resume world after maintenance", lambda: self.start(identifier), world_id=identifier)
                 return
         worlds = [world for world in self.store.all() if world["autostart"]]
         if worlds:
-            self.submit("Start world at boot", lambda: self.start(worlds[0]["id"]))
+            self.submit("Start world at boot", lambda: self.start(worlds[0]["id"]), world_id=worlds[0]["id"])
 
     def close(self):
         self.closing = True
