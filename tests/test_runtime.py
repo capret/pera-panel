@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import time
+from threading import Thread
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,9 +14,18 @@ from pera_panel.storage import PanelError, Store, atomic_write, validate_world
 def runtime(tmp_path):
     store = Store(tmp_path / "data", tmp_path / "game")
     fake = tmp_path / "fake_dst.py"
-    atomic_write(fake, '''import pathlib, sys
+    atomic_write(fake, '''import pathlib, sys, time
 if "-only_update_server_mods" in sys.argv:
     print("Workshop update complete", flush=True)
+    while pathlib.Path(sys.argv[1]).with_suffix(".mods-block").exists():
+        time.sleep(.02)
+    if pathlib.Path(sys.argv[1]).with_suffix(".mods-fail").exists():
+        print("Mod update failed", flush=True)
+        sys.exit(7)
+    if pathlib.Path(sys.argv[1]).with_suffix(".mods-wait-eof").exists():
+        print("Shutting down", flush=True)
+        sys.stdin.read()
+        print("Updater EOF received; exiting", flush=True)
     sys.exit(0)
 print("Booted fake DST; token private-test-token", flush=True)
 for line in sys.stdin:
@@ -69,6 +79,96 @@ def test_mod_update_finishes_before_shards_start(runtime):
     assert "Workshop update complete" in runtime.log(world["id"], "Mods")
     assert runtime.updater is None
     assert runtime.active()
+
+
+def test_start_after_stop_and_adding_mod_does_not_wait_for_updater_console(runtime, tmp_path, monkeypatch):
+    world = validate_world({"name": "Restart with mods", "token": "abc", "caves": True})
+    runtime.store.write_world(world)
+    runtime.start(world)
+    original_pids = {p.pid for p in runtime.processes.values()}
+    runtime.stop()
+    world = validate_world({"mods": [{"id": "378160973"}]}, world)
+    runtime.store.write_world(world)
+    for shard in ("Master", "Caves"):
+        (tmp_path / f"{shard}.mods-wait-eof").touch()
+
+    # Use real children and pipes, with a short deadline instead of waiting 15 minutes.
+    spawn = runtime._spawn
+    updaters = []
+
+    def bounded_spawn(args, world, shard, **kwargs):
+        process = spawn(args, world, shard, **kwargs)
+        if "-only_update_server_mods" in args:
+            updaters.append(process)
+            wait = process.wait
+            monkeypatch.setattr(process, "wait", lambda timeout=None: wait(timeout=min(timeout or 3, 3)))
+        return process
+
+    monkeypatch.setattr(runtime, "_spawn", bounded_spawn)
+    runtime.start(world)
+    assert len(updaters) == 2
+    assert all(p.returncode == 0 for p in updaters)
+    assert all(p.stdin is None for p in updaters)
+    assert "Updater EOF received; exiting" in runtime.log(world["id"], "Mods")
+    assert runtime.active(world["id"])
+    assert not original_pids.intersection(p.pid for p in runtime.processes.values())
+    # Game shards must still have interactive consoles after the updater exits.
+    assert all(p.stdin and not p.stdin.closed for p in runtime.processes.values())
+    runtime.command(world["id"], "save")
+    runtime.stop()
+    assert "c_save()" in runtime.log(world["id"], "Master")
+    master_log = runtime.log(world["id"], "Master")
+    assert master_log.count("Master process started (PID") == 2
+    assert master_log.rfind("Master process started (PID") > master_log.find("Shutting down")
+
+
+def test_mod_update_status_is_scoped_and_clears_before_game_start(runtime, tmp_path):
+    world = validate_world({"name": "Downloading", "token": "abc", "caves": False,
+                            "mods": [{"id": "378160973"}]})
+    runtime.store.write_world(world)
+    gate = tmp_path / "Master.mods-block"
+    gate.touch()
+    errors = []
+
+    def start():
+        try:
+            runtime.start(world)
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = Thread(target=start)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 5
+        while not runtime.status(world["id"])["mod_update"] and time.monotonic() < deadline:
+            time.sleep(.02)
+        status = runtime.status(world["id"])
+        assert status["state"] == "stopped"  # No game shard is running yet.
+        assert status["mod_update"] == {"shard": "Master"}
+        assert runtime.status("abcdef123456")["mod_update"] is None
+        assert not runtime.active()
+    finally:
+        gate.unlink()
+        worker.join(timeout=8)
+    assert not worker.is_alive() and not errors
+    assert runtime.status(world["id"])["mod_update"] is None
+    assert runtime.active(world["id"])
+
+
+def test_failed_mod_update_blocks_game_launch_and_allows_retry(runtime, tmp_path):
+    world = validate_world({"name": "Bad mod", "token": "abc", "caves": False,
+                            "mods": [{"id": "378160973"}]})
+    runtime.store.write_world(world)
+    failure = tmp_path / "Master.mods-fail"
+    failure.touch()
+    with pytest.raises(PanelError, match="Mod download failed"):
+        runtime.start(world)
+    assert not runtime.active() and not runtime.processes and not runtime.readers
+    assert runtime.updater is None and runtime.update_context is None
+    assert "Mod update failed" in runtime.log(world["id"], "Mods")
+    failure.unlink()
+    runtime.start(world)
+    assert runtime.active(world["id"])
 
 
 def test_missing_token_rejected_before_spawn(runtime):

@@ -100,7 +100,9 @@ button:disabled { cursor: not-allowed; }
 .notice code { background: #fff; padding: 2px 5px; border-radius: 3px; color: #173d7b; }
 .error, .notice.error { color: #a2182b; }
 .notice.error { background: #fff1f3; border-color: #f4c0ca; }
-#busy-banner { border-left: 3px solid var(--accent); }
+#busy-banner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; border-left: 3px solid var(--accent); }
+#view-mod-downloads { text-decoration: underline; min-height: 32px; }
+.status-tag[data-state="starting"] { color: #245ac3; background: #edf3ff; }
 .metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; margin-bottom: 26px; }
 .metric { display: flex; flex-direction: column; align-items: start; padding: 18px 20px; border: 1px solid var(--line); border-radius: 9px; background: var(--white); }
 .metric > span { color: var(--muted); font-size: 13px; font-weight: 500; }

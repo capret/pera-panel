@@ -531,5 +531,8 @@
   "Add Klei IDs below, one per line. New players appear automatically.": "在下方添加 Klei ID，每行一个。新玩家会自动显示。",
   "About player permissions": "玩家权限说明",
   "Admins can use the game console. Whitelisted players bypass the password; other players can still join. Verify imported account hints before granting permissions.": "管理员可使用游戏控制台。白名单玩家可绕过密码，其他玩家仍可加入。授权前请核对导入的账号线索。",
-  "World count": "世界数量"
+  "World count": "世界数量",
+  "Updating mods…": "正在更新模组…",
+  "Updating mods for {world} ({shard})…": "正在更新 {world} 的模组（{shard}）…",
+  "View mod downloads": "查看模组下载日志"
 }

@@ -98,7 +98,7 @@ function render() {
   $('.workspace-name').setAttribute('aria-current', currentPage === 'server' ? 'page' : 'false');
   $('#open-archives').classList.toggle('active', currentPage === 'archives');
   $('#open-archives').setAttribute('aria-current', currentPage === 'archives' ? 'page' : 'false');
-  $('#world-state').dataset.state = item?.runtime.state || 'stopped';
+  $('#world-state').dataset.state = item?.runtime.mod_update ? 'starting' : item?.runtime.state || 'stopped';
   document.title = (item ? item.name + ' · ' + t({overview:'World overview',settings:'World settings',mods:'Workshop mods',backups:'Backups & rollback',logs:'Live logs'}[currentTab]) : t(currentPage === 'archives' ? 'Archived worlds' : 'Server overview')) + ' · Pera Panel';
   $('#breadcrumb-world').textContent = item ? item.name + ' / ' + t({overview:'World overview',settings:'World settings',mods:'Workshop mods',backups:'Backups & rollback',logs:'Live logs'}[currentTab]) : t(currentPage === 'archives' ? 'Archived worlds' : 'Server overview');
   document.querySelectorAll('[data-tab]').forEach(link => { link.classList.toggle('active', link.dataset.tab === currentTab); link.setAttribute('aria-current', link.dataset.tab === currentTab ? 'page' : 'false'); link.href = selected ? `/worlds/${selected}/${link.dataset.tab}` : '/overview'; });
@@ -109,7 +109,7 @@ function render() {
   $('#rollback-count').max = item?.snapshots || 50;
   updateRecoveryButton();
   $('#refresh-characters').disabled = Boolean(state.busy);
-  $('#world-state').textContent = runtime ? t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[runtime.state]) + (runtime.uptime_seconds ? ' · ' + duration(runtime.uptime_seconds) : '') : '';
+  $('#world-state').textContent = runtime?.mod_update ? t('Updating mods…') : runtime ? t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[runtime.state]) + (runtime.uptime_seconds ? ' · ' + duration(runtime.uptime_seconds) : '') : '';
   $('#metric-status').textContent = state.worlds.length;
   $('#metric-status-note').textContent = t('{count} running worlds', {count:state.worlds.filter(w => ['running','degraded'].includes(w.runtime.state)).length});
   $('#metric-cpu').textContent = state.host.cpu_percent + '%';
@@ -119,7 +119,10 @@ function render() {
   const busy = state.jobs.find(job => job.id === state.busy);
   $('#open-import').disabled = Boolean(busy) || uploading;
   $('#busy-banner').hidden = !busy;
-  $('#busy-banner').textContent = busy ? t('{job}… Other changes are paused. See logs for progress.', {job: msg(busy.title)}) : '';
+  const updating = state.worlds.find(w => w.runtime.mod_update);
+  $('#busy-message').textContent = updating ? t('Updating mods for {world} ({shard})…', {world:updating.name,shard:msg(updating.runtime.mod_update.shard === 'Master' ? 'Surface' : 'Caves')}) : busy ? t('{job}… Other changes are paused. See logs for progress.', {job: msg(busy.title)}) : '';
+  $('#view-mod-downloads').hidden = !updating;
+  $('#view-mod-downloads').dataset.worldId = updating?.id || '';
   document.querySelectorAll('[data-action]').forEach(button => {
     const action = button.dataset.action;
     const active = runtime && ['running','degraded'].includes(runtime.state);
@@ -127,7 +130,7 @@ function render() {
   });
   renderActivity('#activity-list', state.jobs.filter(job => selected && job.world_id === selected).slice(0, 5));
   renderActivity('#server-activity-list', state.jobs.slice(0, 10), true);
-  $('#server-worlds').innerHTML = state.worlds.map(w => `<button class="server-world-row" data-world="${w.id}"><span><strong>${escapeHTML(w.name)}</strong><small>${escapeHTML(t(w.caves ? 'Surface + caves' : 'Surface only'))}</small></span><span class="status-tag" data-state="${w.runtime.state}">${escapeHTML(t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[w.runtime.state]))}</span></button>`).join('') || `<p class="quiet-empty">${h('No world yet')}</p>`;
+  $('#server-worlds').innerHTML = state.worlds.map(w => `<button class="server-world-row" data-world="${w.id}"><span><strong>${escapeHTML(w.name)}</strong><small>${escapeHTML(t(w.caves ? 'Surface + caves' : 'Surface only'))}</small></span><span class="status-tag" data-state="${w.runtime.mod_update ? 'starting' : w.runtime.state}">${escapeHTML(w.runtime.mod_update ? t('Updating mods…') : t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[w.runtime.state]))}</span></button>`).join('') || `<p class="quiet-empty">${h('No world yet')}</p>`;
   if (!item) return;
   $('#mod-count').textContent = item.mods.filter(mod => mod.enabled).length;
   $('#max-players').textContent = t('{count} survivors', {count: item.max_players});
@@ -308,6 +311,11 @@ document.addEventListener('click', async event => {
     if (['sidebar-create','add-world','empty-create'].includes(target.id)) $('#create-dialog').showModal();
     if (target.id === 'open-archives') await navigate('/archives');
     if (target.id === 'refresh-archives') await loadArchives();
+    if (target.id === 'view-mod-downloads') {
+      await navigate(`/worlds/${target.dataset.worldId}/logs`);
+      $('#log-shard').value = 'Mods';
+      await loadLogs();
+    }
     if (target.dataset.deleteArchive) {
       const archived = archivedWorlds.find(w => w.id === target.dataset.deleteArchive);
       if (!archived) return;

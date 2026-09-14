@@ -1,5 +1,6 @@
 """Own the game processes as an unprivileged user, with bounded logs and graceful shutdown."""
 from collections import deque
+from datetime import datetime, timezone
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -25,6 +26,7 @@ class Runtime:
         self.started_at = None
         self.lock = threading.RLock()
         self.updater = None
+        self.update_context = None
         self.players = PlayerRegistry(store)
         self.probes = {}
         self.probe_at = 0
@@ -40,14 +42,15 @@ class Runtime:
                 "-conf_dir", "clusters", "-cluster", world["id"], "-shard", shard,
                 "-monitor_parent_process", str(os.getpid()), "-backup_log_count", "3"]
 
-    def _spawn(self, args, world, shard):
+    def _spawn(self, args, world, shard, *, interactive=True):
         env = os.environ.copy()
         env["LD_LIBRARY_PATH"] = str(self.binary().parent / "lib64") + ":" + str(self.binary().parent)
         # Do not pass panel secrets to game processes or mods.
         for key in tuple(env):
             if key.startswith("PERA_"):
                 env.pop(key)
-        process = subprocess.Popen(args, cwd=self.binary().parent, env=env, stdin=subprocess.PIPE,
+        process = subprocess.Popen(args, cwd=self.binary().parent, env=env,
+                                   stdin=subprocess.PIPE if interactive else subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    text=True, encoding="utf-8", errors="replace", bufsize=1)
         path = self.store.logs / world["id"] / f"{shard}.log"
@@ -63,6 +66,10 @@ class Runtime:
     def _read_log(self, process, path, secrets, identifier, shard):
         handler = RotatingFileHandler(path, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
         try:
+            stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            handler.emit(logging.LogRecord("dst", logging.INFO, "", 0,
+                                           f"[Pera Panel] {stamp} | {shard} process started (PID {process.pid})",
+                                           (), None))
             for output in iter(lambda: process.stdout.readline(65536), ""):
                 try:
                     self.players.log_line(identifier, output, shard)
@@ -88,9 +95,13 @@ class Runtime:
             return
         # Update sequentially so two Steam Workshop clients do not write shared mods together.
         for shard in (["Master", "Caves"] if world["caves"] else ["Master"]):
-            process = self._spawn(self.arguments(world, shard) + ["-only_update_server_mods"], world, "Mods")
+            # An updater never accepts console commands. Give it EOF immediately so its
+            # console reader cannot keep the process alive after it logs "Shutting down".
+            process = self._spawn(self.arguments(world, shard) + ["-only_update_server_mods"],
+                                  world, "Mods", interactive=False)
             with self.lock:
                 self.updater = process
+                self.update_context = {"world_id": world["id"], "shard": shard}
             try:
                 try:
                     code = process.wait(timeout=900)
@@ -106,6 +117,7 @@ class Runtime:
                 self.readers.pop(process.pid).join(timeout=3)
                 with self.lock:
                     self.updater = None
+                    self.update_context = None
 
     def start(self, world):
         if self.active():
@@ -275,7 +287,11 @@ class Runtime:
                                    "exit_code": code, "memory_mb": round(memory / 1024 ** 2, 1)})
             count = sum(shard["running"] for shard in shards)
             state = "running" if shards and count == len(shards) else "degraded" if count else "failed" if shards else "stopped"
+            update = self.update_context
+            mod_update = ({"shard": update["shard"]} if update and update["world_id"] == identifier
+                          and self.updater and self.updater.poll() is None else None)
             return {"state": state, "shards": shards,
+                    "mod_update": mod_update,
                     "uptime_seconds": int(time.time() - self.started_at) if count and self.started_at else 0,
                     "memory_mb": round(sum(shard["memory_mb"] for shard in shards), 1)}
 

@@ -215,6 +215,10 @@ The panel sends `c_shutdown(true)` to each shard, flushes the command and closes
 
 The panel still requires actual process exit; a log line alone does not mark the world stopped. Normal stop/backup/recovery operations do not force-kill a timed-out shard. A regression test runs paired subprocesses that refuse to exit until console EOF, alongside the existing timeout test.
 
+Startup downloads enabled mods before launching the game shards. These updater processes receive closed input (`DEVNULL`) from launch, so a console reader cannot hold them open after `Shutting down`. Game shards retain interactive input for save, announcement, rollback, and shutdown commands. Regression tests cover starting, stopping, adding a mod, and starting both shards again, plus failed-download cleanup and retry.
+
+If Start appears stuck while a Surface/Caves log ends with an old shutdown, use **View mod downloads** in the current operation banner. The panel shows **Updating mods** while the updater is active; the previous shard log remains until that shard launches again. Every spawned process appends a dated PID marker so separate runs can be distinguished. A download failure or timeout still prevents game launch and is reported in Recent activity; the panel does not treat a shutdown log line as success.
+
 ## Native rollback and full backup restoration
 
 **Native game rollback** sends `c_rollback(count)` to Master using the existing dedicated-server console connection. Both configured shards must be running; the count must be an integer from 1 to the world's snapshot retention setting. The panel does not stop or relaunch processes for this action. The game decides whether the requested snapshot exists and performs the reload. The job records that the request was sent, not that the reload succeeded: check game logs. Players may see loading or reconnect. This behavior follows the [game's console command](https://github.com/taichunmin/dont-starve-together-game-scripts/blob/master/consolecommands.lua).
