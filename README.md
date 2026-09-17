@@ -231,7 +231,7 @@ Stop the selected world before saving settings or mods. Caves cannot be enabled 
 
 The panel owns the generated INI/Lua files and regenerates them from each world’s `pera.json` metadata before startup. Use the dashboard to edit these settings; direct edits to generated files are overwritten.
 
-Add a numeric Workshop ID (the `id=` part of its URL). An empty options object `{}` uses mod defaults. Example:
+Add a numeric Workshop ID (the `id=` part of its URL). The mod list automatically looks up names, description excerpts, and last-updated dates for new and saved mods through the [public Steam Workshop API](https://partner.steamgames.com/doc/webapi/ISteamRemoteStorage#GetPublishedFileDetails), without an API key. Successful lookups are cached in memory for one hour. If Steam is unavailable or the item is private, deleted, or not a DST item, the ID and Workshop link remain available, with a retry button; saving mods does not depend on the lookup. An empty options object `{}` uses mod defaults. Example:
 
 ```json
 {"SHOWPLAYERICONS": true}

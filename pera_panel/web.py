@@ -17,6 +17,7 @@ from . import __version__
 from .service import Service
 from .save_import import CHUNK, MAX_UPLOAD_BYTES, UPLOAD_REQUEST_LIMIT
 from .storage import PanelError, line
+from .workshop import Workshop
 
 
 def create_app(config, service=None):
@@ -27,6 +28,7 @@ def create_app(config, service=None):
                       PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
     service = service or Service(config["data_dir"], config["game_dir"])
     app.extensions["pera"] = service
+    workshop = app.extensions["workshop"] = Workshop()
     translations = json.loads((Path(__file__).parent / "static" / "zh-CN.json").read_text(encoding="utf-8"))
     attempts = OrderedDict()
     # A password reset invalidates existing sessions even when the signing key is preserved.
@@ -147,6 +149,10 @@ def create_app(config, service=None):
                              "disk_free_gb": round(disk.free / 1024**3, 1)},
                        game_installed=(service.store.game / "bin64" /
                                        "dontstarve_dedicated_server_nullrenderer_x64").is_file())
+
+    @app.post("/api/workshop/details")
+    def workshop_details():
+        return jsonify(mods=workshop.details(body().get("ids")))
 
     @app.post("/api/worlds")
     def create_world():

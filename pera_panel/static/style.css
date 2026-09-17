@@ -199,6 +199,11 @@ summary:hover { color: var(--accent-hover); }
 .mod-heading { display: flex; align-items: center; gap: 14px; }
 .mod-heading .checkbox { flex: 1; margin: 0; font-weight: 600; }
 .mod-heading a { font-size: 13px; }
+.mod-name { overflow-wrap: anywhere; }
+.mod-info { margin-top: 8px; }
+.mod-meta, .mod-lookup-status { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.mod-description { margin: 8px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mod-lookup-status .text-button { padding: 0 4px; min-height: 28px; font-size: inherit; text-decoration: underline; }
 .mod-row details { margin-top: 12px; }
 .mod-row summary { font-size: 13px; padding: 12px 0 0; }
 .mod-row details[open] summary { padding-bottom: 12px; }

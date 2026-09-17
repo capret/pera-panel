@@ -8,6 +8,7 @@ let importTarget = null, uploading = false, currentPage = 'server';
 let archivedWorlds = [], archivesLoading = false;
 let playerWorld = null, playerRows = [], characterRows = [], characterWorld = null, playerPolling = false, playerPollAt = 0;
 const seenJobs = new Set();
+const modDetails = new Map();
 const csrf = $('meta[name="csrf-token"]').content;
 
 async function api(path, method = 'GET', data) {
@@ -62,6 +63,7 @@ async function navigate(path, {replace = false} = {}) {
   if (!state) return;
   if (currentPage === 'archives' && !state.busy) await loadArchives();
   if (selected) {
+    if (currentTab === 'mods') loadModDetails();
     if (!state.busy && ['settings','backups'].includes(currentTab)) await loadCharacters();
     if (currentTab === 'backups') await loadBackups();
     if (currentTab === 'logs') await loadLogs();
@@ -221,8 +223,40 @@ function captureMods() {
   });
 }
 function renderMods() {
-  $('#mods-list').innerHTML = mods.map((mod, index) => `<article class="mod-row" data-index="${index}"><div class="mod-heading"><label class="checkbox"><input type="checkbox" ${mod.enabled ? 'checked' : ''}>${h('Workshop {id}', {id: mod.id})}</label><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.id}" target="_blank" rel="noreferrer" data-i18n>View ↗</a><button class="icon-button remove-mod" data-index="${index}" aria-label="Remove mod ${mod.id}" data-i18n-aria-label="${escapeHTML(JSON.stringify(msg('Remove mod {id}', {id: mod.id})))}">×</button></div><details><summary data-i18n>Configuration options (JSON)</summary><label><span class="sr-only" data-i18n>Configuration options (JSON)</span><textarea class="code-input" rows="4">${escapeHTML(JSON.stringify(mod.options,null,2))}</textarea></label></details></article>`).join('') || '<div data-i18n class="quiet-empty">No mods added.</div>';
+  $('#mods-list').innerHTML = mods.map((mod, index) => `<article class="mod-row" data-index="${index}" data-mod-id="${mod.id}"><div class="mod-heading"><label class="checkbox"><input type="checkbox" ${mod.enabled ? 'checked' : ''}><span class="mod-name"></span></label><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.id}" target="_blank" rel="noreferrer" data-i18n>View ↗</a><button class="icon-button remove-mod" data-index="${index}" aria-label="Remove mod ${mod.id}" data-i18n-aria-label="${escapeHTML(JSON.stringify(msg('Remove mod {id}', {id: mod.id})))}">×</button></div><div class="mod-info" aria-live="polite"></div><details><summary data-i18n>Configuration options (JSON)</summary><label><span class="sr-only" data-i18n>Configuration options (JSON)</span><textarea class="code-input" rows="4">${escapeHTML(JSON.stringify(mod.options,null,2))}</textarea></label></details></article>`).join('') || '<div data-i18n class="quiet-empty">No mods added.</div>';
+  renderModDetails();
   I18n.bind($('#mods-list'));
+  if (currentTab === 'mods') loadModDetails();
+}
+function renderModDetails() {
+  document.querySelectorAll('.mod-row').forEach(row => {
+    const id = row.dataset.modId, info = modDetails.get(id);
+    const available = info?.status === 'available';
+    // Only replace read-only information. In-flight lookups must preserve form edits and focus.
+    row.querySelector('.mod-name').textContent = available ? info.title : t('Workshop {id}', {id});
+    const status = !info || info.status === 'loading' ? 'Loading mod details…' :
+      info.stale ? 'Showing cached details. Steam Workshop is unavailable.' :
+      info.status === 'error' ? 'Could not load mod details. You can still save this mod.' :
+      info.status === 'unavailable' ? 'No public DST mod details found. Check the Workshop ID.' : '';
+    const updated = available && info.updated_at ? new Date(info.updated_at).toLocaleDateString(I18n.locale, {year:'numeric',month:'short',day:'numeric'}) : '';
+    row.querySelector('.mod-info').innerHTML = `<p class="mod-meta">${h('Workshop ID')}: <code>${escapeHTML(id)}</code>${updated ? ` · ${h('Updated {date}', {date:updated})}` : ''}</p>${available && info.description ? `<p class="mod-description">${escapeHTML(info.description)}</p>` : ''}${status ? `<p class="mod-lookup-status">${h(status)}${info && info.status !== 'loading' ? ` <button type="button" class="text-button retry-mod-details" data-mod-id="${id}">${h('Retry')}</button>` : ''}</p>` : ''}`;
+  });
+  I18n.bind($('#mods-list'));
+}
+async function loadModDetails(retryId) {
+  if (retryId && modDetails.get(retryId)?.status !== 'loading') modDetails.delete(retryId);
+  const ids = [...new Set(mods.map(mod => mod.id))].filter(id => !modDetails.has(id));
+  if (!ids.length) return;
+  ids.forEach(id => modDetails.set(id, {status:'loading'}));
+  renderModDetails();
+  try {
+    const result = await api('/workshop/details', 'POST', {ids});
+    const details = new Map(result.mods.map(info => [info.id, info]));
+    ids.forEach(id => modDetails.set(id, details.get(id) || {status:'unavailable'}));
+  } catch {
+    ids.forEach(id => modDetails.set(id, {status:'error'}));
+  }
+  renderModDetails();
 }
 function renderPlayers() {
   const rows = playerWorld === selected ? playerRows : [];
@@ -367,6 +401,7 @@ document.addEventListener('click', async event => {
       mods.push({id,enabled:true,options:{}}); $('#new-mod-id').value = ''; renderMods();
     }
     if (target.matches('.remove-mod')) { captureMods(); mods.splice(Number(target.dataset.index),1); renderMods(); }
+    if (target.matches('.retry-mod-details')) loadModDetails(target.dataset.modId);
     if (target.id === 'save-mods') { captureMods(); await queued(worldURL(),'PATCH',{mods}); }
   } catch (error) { toast(I18n.error(error), true); }
 });
@@ -445,7 +480,7 @@ $('#import-form').addEventListener('submit', async event => {
   }
 });
 document.addEventListener('languagechange', () => {
-  render(); renderPlayers(); renderCharacters();
+  render(); renderPlayers(); renderCharacters(); renderModDetails();
   if (currentTab === 'backups') loadBackups().catch(error => toast(I18n.error(error), true));
 });
 window.addEventListener('popstate', () => navigate(location.pathname, {replace:true}).catch(error => toast(I18n.error(error), true)));

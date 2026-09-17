@@ -534,5 +534,11 @@
   "World count": "世界数量",
   "Updating mods…": "正在更新模组…",
   "Updating mods for {world} ({shard})…": "正在更新 {world} 的模组（{shard}）…",
-  "View mod downloads": "查看模组下载日志"
+  "View mod downloads": "查看模组下载日志",
+  "Loading mod details…": "正在加载模组信息…",
+  "Showing cached details. Steam Workshop is unavailable.": "Steam 创意工坊暂时无法连接，正在显示缓存信息。",
+  "Could not load mod details. You can still save this mod.": "无法加载模组信息，仍可保存此模组。",
+  "No public DST mod details found. Check the Workshop ID.": "未找到公开的饥荒联机版模组信息，请检查创意工坊 ID。",
+  "Updated {date}": "更新于 {date}",
+  "Retry": "重试"
 }
