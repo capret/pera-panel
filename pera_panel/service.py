@@ -15,6 +15,7 @@ from .runtime import Runtime
 from .archives import Archives
 from .players import PlayerRegistry, USER_ID
 from .save_import import stage_save
+from .save_export import create_save_zip
 from .storage import PanelError, Store, line, validate_world, write_json
 
 
@@ -227,6 +228,17 @@ class Service:
 
     def delete_backup(self, identifier, snapshot):
         shutil.rmtree(self.backup_path(identifier, snapshot))
+
+    def export_save(self, identifier):
+        # Hold the operation lock only while preparing an independent temporary ZIP.
+        # A queued start, restore, or deletion cannot change these files mid-export.
+        with self.lock:
+            if self.busy or self.closing:
+                raise PanelError("Another operation is in progress. Wait for it to finish.", 409)
+            world = self.store.get(identifier)
+            if self.runtime.active(identifier):
+                raise PanelError("Stop this world before downloading its save.", 409)
+            return create_save_zip(self.store.world_path(identifier), world, self.store.root)
 
     def import_save(self, identifier, upload, confirmation, inherit_mods=True):
         """Replace a cluster as one operation; preserve panel settings and keep success stopped."""

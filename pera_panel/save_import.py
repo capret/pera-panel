@@ -1,5 +1,6 @@
 """Inspect and stage local DST saves without extracting executable configuration files."""
 import configparser
+from contextlib import nullcontext
 from pathlib import Path
 import re
 import shutil
@@ -23,7 +24,7 @@ CHUNK = 1024**2
 
 def preflight(upload):
     # Bound the central directory before ZipFile allocates a ZipInfo object per entry.
-    with upload.open("rb") as stream:
+    with (nullcontext(upload) if hasattr(upload, "read") else upload.open("rb")) as stream:
         stream.seek(0, 2)
         size = stream.tell()
         if size > MAX_UPLOAD_BYTES:

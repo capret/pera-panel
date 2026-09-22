@@ -540,5 +540,15 @@
   "Could not load mod details. You can still save this mod.": "无法加载模组信息，仍可保存此模组。",
   "No public DST mod details found. Check the Workshop ID.": "未找到公开的饥荒联机版模组信息，请检查创意工坊 ID。",
   "Updated {date}": "更新于 {date}",
-  "Retry": "重试"
+  "Retry": "重试",
+  "Download saved game": "下载世界存档",
+  "↓ Download save ZIP": "↓ 下载存档 ZIP",
+  "Preparing save ZIP…": "正在准备存档 ZIP…",
+  "Save ZIP is ready. Check your browser downloads.": "存档 ZIP 已准备好，请查看浏览器下载列表。",
+  "Keep a copy on your computer, or upload it again with Import local save. Includes surface and cave progress, player saves, and mod settings.": "将存档保存到电脑，也可以通过“导入本地存档”再次上传。包含地上与洞穴进度、玩家存档和模组配置。",
+  "Stop the world before downloading to keep both shards consistent. Server tokens and passwords are excluded. ZIP limit: 256 MiB.": "下载前请先停止世界，确保两个分片的存档一致。下载不包含服务器令牌和密码。ZIP 大小上限为 256 MiB。",
+  "Linked or special save files cannot be downloaded.": "无法下载包含符号链接或特殊文件的存档。",
+  "This world has no saved game yet. Start and stop it before downloading.": "此世界尚无存档。请先启动并停止世界，再下载存档。",
+  "Save files changed during download. Try again after stopping the world.": "准备下载时存档发生了变化，请停止世界后重试。",
+  "Stop this world before downloading its save.": "下载存档前请先停止此世界。"
 }

@@ -5,6 +5,7 @@ const {t, descriptor: msg} = I18n;
 const h = (key, params = {}) => `<span data-i18n-message="${escapeHTML(JSON.stringify(msg(key, params)))}">${escapeHTML(t(key, params))}</span>`;
 let state = null, selected = null, currentTab = 'overview', mods = [], confirmCallback = null, polling = false;
 let importTarget = null, uploading = false, currentPage = 'server';
+let downloadingSave = false;
 let archivedWorlds = [], archivesLoading = false;
 let playerWorld = null, playerRows = [], characterRows = [], characterWorld = null, playerPolling = false, playerPollAt = 0;
 const seenJobs = new Set();
@@ -120,6 +121,8 @@ function render() {
   $('#metric-disk').textContent = state.host.disk_free_gb + ' GB';
   const busy = state.jobs.find(job => job.id === state.busy);
   $('#open-import').disabled = Boolean(busy) || uploading;
+  $('#download-save').disabled = !item || downloadingSave || Boolean(state.busy) || Boolean(runtime?.mod_update) || ['running','degraded'].includes(runtime?.state);
+  I18n.text('#download-save', downloadingSave ? 'Preparing save ZIP…' : '↓ Download save ZIP');
   $('#busy-banner').hidden = !busy;
   const updating = state.worlds.find(w => w.runtime.mod_update);
   $('#busy-message').textContent = updating ? t('Updating mods for {world} ({shard})…', {world:updating.name,shard:msg(updating.runtime.mod_update.shard === 'Master' ? 'Surface' : 'Caves')}) : busy ? t('{job}… Other changes are paused. See logs for progress.', {job: msg(busy.title)}) : '';
@@ -174,6 +177,32 @@ async function refresh() {
     $('#connection-error').textContent = t('Connection interrupted: {error}', {error: msg(I18n.error(error))});
     $('#connection-error').hidden = false;
   } finally { polling = false; }
+}
+async function downloadSave() {
+  if (downloadingSave) return;
+  const id = selected, url = worldURL();
+  downloadingSave = true;
+  render();
+  try {
+    const response = await fetch('/api' + url + '/export-save', {method:'POST', headers:{'X-CSRF-Token':csrf}});
+    if (response.status === 401) { location.reload(); throw new I18n.Error('Please sign in.'); }
+    if (!response.ok) {
+      const result = await response.json();
+      throw new I18n.Error(I18n.message(result.error_i18n) || result.error || 'The request failed.');
+    }
+    const file = await response.blob();
+    const objectURL = URL.createObjectURL(file), link = document.createElement('a');
+    link.href = objectURL;
+    link.download = response.headers.get('Content-Disposition')?.match(/filename="?([^";]+)"?/)?.[1] || `pera-save-${id}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectURL), 60000);
+    toast('Save ZIP is ready. Check your browser downloads.');
+  } finally {
+    downloadingSave = false;
+    render();
+  }
 }
 function renderArchives() {
   const list = $('#archive-list');
@@ -345,6 +374,7 @@ document.addEventListener('click', async event => {
     if (['sidebar-create','add-world','empty-create'].includes(target.id)) $('#create-dialog').showModal();
     if (target.id === 'open-archives') await navigate('/archives');
     if (target.id === 'refresh-archives') await loadArchives();
+    if (target.id === 'download-save') await downloadSave();
     if (target.id === 'view-mod-downloads') {
       await navigate(`/worlds/${target.dataset.worldId}/logs`);
       $('#log-shard').value = 'Mods';

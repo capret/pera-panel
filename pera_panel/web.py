@@ -1,5 +1,5 @@
 from collections import OrderedDict, deque
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import hmac
 import json
 import secrets
@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 import tempfile
 
-from flask import Flask, abort, jsonify, render_template, request, session
+from flask import Flask, abort, jsonify, render_template, request, send_file, session
 import psutil
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash
@@ -238,6 +238,20 @@ def create_app(config, service=None):
     @app.delete("/api/worlds/<identifier>/backups/<snapshot>")
     def delete_backup(identifier, snapshot):
         return operation("Delete backup", lambda: service.delete_backup(identifier, snapshot), identifier)
+
+    @app.post("/api/worlds/<identifier>/export-save")
+    def export_save(identifier):
+        stream, size = service.export_save(identifier)
+        try:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            response = send_file(stream, mimetype="application/zip", as_attachment=True,
+                                 download_name=f"pera-save-{identifier}-{stamp}.zip", conditional=False)
+            response.content_length = size
+            response.call_on_close(stream.close)
+            return response
+        except BaseException:
+            stream.close()
+            raise
 
     @app.post("/api/worlds/<identifier>/import-save")
     def import_save(identifier):
