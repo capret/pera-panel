@@ -550,5 +550,10 @@
   "Linked or special save files cannot be downloaded.": "无法下载包含符号链接或特殊文件的存档。",
   "This world has no saved game yet. Start and stop it before downloading.": "此世界尚无存档。请先启动并停止世界，再下载存档。",
   "Save files changed during download. Try again after stopping the world.": "准备下载时存档发生了变化，请停止世界后重试。",
-  "Stop this world before downloading its save.": "下载存档前请先停止此世界。"
+  "Stop this world before downloading its save.": "下载存档前请先停止此世界。",
+  "Where to find your save": "在哪里找到存档",
+  "On the computer that hosted the world, save and exit the game, then open:": "在创建并主持该世界的电脑上，保存并退出游戏，然后打开以下目录（Windows 的 Documents 即“文档”文件夹）：",
+  "Open your numbered account folder, then the Cluster_# folder for your world (for example, Cluster_1). ZIP that one world folder, including Master and Caves if present.": "进入以数字命名的账号文件夹，再找到该世界对应的 Cluster_# 文件夹（例如 Cluster_1）。只将这一个世界文件夹压缩为 ZIP，包含 Master 和 Caves（如有）。",
+  "For Steam Cloud saves, look in your account folder’s CloudSaves folder and open the matching world folder. Extract Master.zip into Master and Caves.zip into Caves, then ZIP that world folder.": "Steam 云存档位于账号目录下的 CloudSaves 文件夹中。进入对应的世界文件夹，将 Master.zip 解压到 Master、Caves.zip 解压到 Caves，然后把整个世界文件夹压缩为 ZIP。",
+  "Klei’s save-location guide ↗": "Klei 官方存档位置说明 ↗"
 }

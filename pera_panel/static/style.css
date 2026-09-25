@@ -253,6 +253,10 @@ dialog::backdrop { background: #101b2d99; }
 .save-file-picker { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
 #save-filename { overflow-wrap: anywhere; color: var(--muted); font-size: 13px; }
 #import-form .help-disclosure { margin-bottom: 18px; }
+.save-folder-paths { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px 14px; margin: 0 0 14px; font-size: 13px; }
+.save-folder-paths dt { font-weight: 600; }
+.save-folder-paths dd { margin: 0; min-width: 0; }
+.save-folder-paths code { overflow-wrap: anywhere; user-select: all; }
 #import-progress { width: 100%; accent-color: var(--accent); }
 .login-page { min-height: 100dvh; display: grid; place-items: center; padding: 28px 20px; background: #edf1f7; }
 .login-card { width: 100%; max-width: 440px; padding: 32px 36px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: 0 16px 48px #2638580d; }
