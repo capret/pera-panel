@@ -258,7 +258,13 @@ If Start appears stuck while a Surface/Caves log ends with an old shutdown, use 
 
 ## Worlds, mods, and backups
 
-Stop the selected world before saving settings or mods. Caves cannot be enabled or disabled after save data is generated. Create a new world for a different shard layout. Surface and cave overrides accept JSON, such as `{"world_size":"default"}`; option names and supported values come from DST. Changes to generation options do not regenerate existing terrain.
+Stop the selected world before saving settings or mods. Caves cannot be enabled or disabled after save data is generated. Create a new world for a different shard layout.
+
+**Create a world** and **World settings → World generation** provide common Surface/Caves controls: size, land branches/loops, starting season, season lengths, day/night balance, resources, creatures, hound attacks, and Deerclops. Defaults are shown explicitly (for example, Large worlds, an Autumn start, 20-day Autumn/Spring and 15-day Winter/Summer). Seasons and the day cycle are controlled by Surface. Choices use DST's [customization values](https://github.com/taichunmin/dont-starve-together-game-scripts/blob/master/map/customize.lua) and [season tuning](https://github.com/taichunmin/dont-starve-together-game-scripts/blob/master/tuning.lua); mods can change their behavior. The panel starts with the standard `SURVIVAL_TOGETHER` and `DST_CAVE` presets. The same choices can produce different map layouts.
+
+**Advanced overrides (JSON)** shares the same data with the controls. Editing either updates the other; unknown options and custom values are preserved. Choosing Default removes that override so DST supplies its standard value. Disabled Caves retain their settings for later use. Invalid JSON blocks saving instead of resetting the options.
+
+Configure generation choices before the world's first start. These fields display the panel's saved choices, not settings read from the live game save. Changes do not regenerate existing terrain, and imported saves may have been generated with different settings. Use a new world to guarantee a fresh layout with the selected generation options.
 
 The panel owns the generated INI/Lua files and regenerates them from each world’s `pera.json` metadata before startup. Use the dashboard to edit these settings; direct edits to generated files are overwritten.
 

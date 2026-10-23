@@ -186,6 +186,16 @@ summary:hover { color: var(--accent-hover); }
 .help-disclosure ol { padding-left: 24px; }
 .help-disclosure li { padding-left: 3px; margin-bottom: 8px; }
 .settings-card { max-width: 1150px; }
+.world-generation { margin: 24px 0; padding-top: 22px; border-top: 1px solid var(--line); }
+.world-generation h3 { margin-bottom: 10px; }
+.world-shard > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+.world-shard > summary::before { content: '▸'; color: var(--muted); }
+.world-shard[open] > summary::before { content: '▾'; }
+.world-shard > summary small { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted); }
+.world-option-group { margin-left: 14px; }
+.world-option-group > summary { font-size: 14px; }
+.world-shard .notice { margin-top: 16px; }
+#create-dialog { width: min(780px,calc(100vw - 32px)); }
 .danger-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; max-width: 1150px; margin-top: 22px; }
 .danger-card p { font-size: 13px; margin-top: 5px; }
 .danger-card .button { flex-shrink: 0; }

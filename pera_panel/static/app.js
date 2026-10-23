@@ -233,9 +233,9 @@ function fillSettings() {
   if (!w) return;
   const input = (key, title, type = 'text') => `<label data-i18n>${title}<input name="${key}" type="${type}" value="${escapeHTML(w[key])}" ${key === 'name' ? 'required maxlength="80"' : ''}></label>`;
   const check = (key, title) => `<label data-i18n class="checkbox"><input type="checkbox" name="${key}" ${w[key] ? 'checked' : ''}>${title}</label>`;
-  const json = (key, title) => `<label data-i18n>${title}<textarea class="code-input" name="${key}" rows="5">${escapeHTML(JSON.stringify(w[key], null, 2))}</textarea></label>`;
   const ids = (key, title) => `<label data-i18n>${title}<textarea name="${key}" rows="3" data-i18n-placeholder placeholder="KU_abcdefgh, one per line">${escapeHTML(w[key].join('\n'))}</textarea></label>`;
-  $('#settings-form').innerHTML = `<div class="form-grid">${input('name','World name')}${input('description','Description')}${input('password','Join password','password')}<label data-i18n>Klei cluster token<input name="token" type="password" autocomplete="off" data-i18n-placeholder placeholder="${w.has_token ? 'Token saved · leave blank to keep' : 'Paste your Klei token'}"></label><label data-i18n>Game mode<select name="game_mode">${['survival','endless','wilderness'].map(mode => `<option data-i18n value="${mode}" ${mode === w.game_mode ? 'selected' : ''}>${mode}</option>`).join('')}</select></label><label data-i18n>Player slots<input type="number" min="1" max="64" name="max_players" value="${w.max_players}"></label></div><div class="checks">${check('caves','Include caves')}${check('pause_when_empty','Pause when empty')}${check('pvp','Allow PvP')}${check('autostart','Start this world at boot')}</div><details><summary data-i18n>World generation & in-game snapshots</summary><p data-i18n class="field-help">Use JSON overrides. Existing terrain will not regenerate; create a new world for a new layout.</p><div class="form-grid">${json('master_overrides','Surface overrides')}${json('caves_overrides','Caves overrides')}<label data-i18n>In-game save snapshots<input type="number" name="snapshots" min="1" max="50" value="${w.snapshots}"></label></div></details><details><summary data-i18n>Player permissions</summary><p data-i18n class="field-help">Add Klei IDs below, one per line. New players appear automatically.</p><div id="player-candidates"></div><details class="help-disclosure"><summary data-i18n>About player permissions</summary><p data-i18n>Admins can use the game console. Whitelisted players bypass the password; other players can still join. Verify imported account hints before granting permissions.</p></details><div class="form-grid">${ids('admins','Administrators (OP)')}${ids('banned','Banned players')}${ids('whitelist','Whitelisted players')}</div></details><div class="form-actions"><button data-i18n type="submit" class="button primary">Save settings</button></div>`;
+  $('#settings-form').innerHTML = `<div class="form-grid">${input('name','World name')}${input('description','Description')}${input('password','Join password','password')}<label data-i18n>Klei cluster token<input name="token" type="password" autocomplete="off" data-i18n-placeholder placeholder="${w.has_token ? 'Token saved · leave blank to keep' : 'Paste your Klei token'}"></label><label data-i18n>Game mode<select name="game_mode">${['survival','endless','wilderness'].map(mode => `<option data-i18n value="${mode}" ${mode === w.game_mode ? 'selected' : ''}>${mode}</option>`).join('')}</select></label><label data-i18n>Player slots<input type="number" min="1" max="64" name="max_players" value="${w.max_players}"></label></div><div class="checks">${check('caves','Include caves')}${check('pause_when_empty','Pause when empty')}${check('pvp','Allow PvP')}${check('autostart','Start this world at boot')}</div><div id="settings-generation"></div><label data-i18n>In-game save snapshots<input type="number" name="snapshots" min="1" max="50" value="${w.snapshots}"></label><details><summary data-i18n>Player permissions</summary><p data-i18n class="field-help">Add Klei IDs below, one per line. New players appear automatically.</p><div id="player-candidates"></div><details class="help-disclosure"><summary data-i18n>About player permissions</summary><p data-i18n>Admins can use the game console. Whitelisted players bypass the password; other players can still join. Verify imported account hints before granting permissions.</p></details><div class="form-grid">${ids('admins','Administrators (OP)')}${ids('banned','Banned players')}${ids('whitelist','Whitelisted players')}</div></details><div class="form-actions"><button data-i18n type="submit" class="button primary">Save settings</button></div>`;
+  WorldSettings.mount($('#settings-generation'), w);
   I18n.bind($('#settings-form'));
   renderPlayers();
 }
@@ -244,7 +244,7 @@ function collectSettings(form) {
   for (const key of ['max_players','snapshots']) if (key in values) values[key] = Number(values[key]);
   for (const key of ['caves','pause_when_empty','pvp','autostart']) if (form.elements.namedItem(key)) values[key] = form.elements.namedItem(key).checked;
   for (const key of ['master_overrides','caves_overrides']) if (key in values) {
-    try { values[key] = JSON.parse(values[key] || '{}'); }
+    try { values[key] = WorldSettings.parse(values[key] || '{}'); }
     catch { throw new I18n.Error('{field}: enter a valid JSON object.', {field: msg(key === 'master_overrides' ? 'Surface overrides' : 'Caves overrides')}); }
   }
   for (const key of ['admins','banned','whitelist']) if (key in values) values[key] = values[key].split(/\s+/).filter(Boolean);
@@ -442,9 +442,15 @@ document.addEventListener('click', async event => {
     if (target.id === 'save-mods') { captureMods(); await queued(worldURL(),'PATCH',{mods}); }
   } catch (error) { toast(I18n.error(error), true); }
 });
+WorldSettings.mount($('#create-generation'), {}, {creating:true});
+for (const selector of ['#create-form','#settings-form']) {
+  $(selector).addEventListener('change', event => {
+    if (event.target.name === 'caves') WorldSettings.updateCaves($(selector).querySelector('.world-generation'));
+  });
+}
 $('#create-form').addEventListener('submit', async event => {
   event.preventDefault();
-  try { await queued('/worlds','POST',collectSettings(event.target)); $('#create-dialog').close(); event.target.reset(); }
+  try { await queued('/worlds','POST',collectSettings(event.target)); $('#create-dialog').close(); event.target.reset(); WorldSettings.mount($('#create-generation'), {}, {creating:true}); }
   catch (error) { toast(I18n.error(error),true); }
 });
 $('#settings-form').addEventListener('submit', async event => {
