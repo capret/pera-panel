@@ -51,9 +51,11 @@ sudo bash install.sh install --repo https://github.com/capret/pera-panel.git --r
 
 The repository URL and branch/tag are saved for future updates. Only public HTTPS GitHub repositories are supported by the remote installer. For a private repository, clone it yourself on the server and use `--source /absolute/path/to/checkout`.
 
-Remote installs and console updates try GitHub directly first. If the clone fails or times out, they retry the same repository and branch/tag through [ghfast.top](https://ghfast.top/), which documents HTTPS Git clone support. Each attempt has a two-minute limit and stops after 20 seconds of transfer below 1 KiB/s. The proxy receives the public repository URL and supplies the downloaded source; Git credential helpers and authentication prompts are disabled for these public fetches. The original GitHub URL remains the saved source, so the next update tries GitHub first again. Local `--source` updates do not use the proxy.
+Remote installs and console updates try GitHub directly first. If the clone fails or times out, they offer a proxy fallback, initially [ghfast.top](https://ghfast.top/). In an interactive terminal, press **Enter** to use the saved/default proxy, enter a replacement HTTPS proxy URL, or type **off** to cancel. Invalid URLs prompt again. With `--yes` or without an interactive terminal, the configured proxy is used automatically; a configured `off` disables fallback entirely. The proxy must support Git clone URLs in the form `https://PROXY/https://github.com/OWNER/REPO.git`, as ghfast.top documents.
 
-The fallback preference is saved after a successful deployment. Override it with `PERA_GITHUB_PROXY` or `--github-proxy` (an HTTPS origin without credentials/path, or `off`):
+Each attempt fetches the same repository and branch/tag, with a two-minute limit and a stop after 20 seconds of transfer below 1 KiB/s. The proxy receives the public repository URL and supplies the downloaded source; Git credential helpers and authentication prompts are disabled for these public fetches. The original GitHub URL remains the saved source, so the next update tries GitHub first again. Local `--source` updates do not use the proxy.
+
+The fallback preference, including a replacement entered at the prompt, is saved after a successful deployment. Override it with `PERA_GITHUB_PROXY` or `--github-proxy` (an HTTPS origin without credentials/path, or `off`):
 
 ```bash
 sudo pera-panel update-panel --github-proxy https://ghfast.top

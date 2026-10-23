@@ -12,16 +12,16 @@ pytestmark = pytest.mark.skipif(not BASH, reason="Bash is needed for installer c
 
 
 def function(name):
-    match = re.search(rf"^{name}\(\) (?:\{{.*?^\}}|\(.*?^\))", SCRIPT, re.M | re.S)
+    match = re.search(rf"^{name}\(\) (?:\{{[^\n]*\}}$|\{{.*?^\}}|\(.*?^\))", SCRIPT, re.M | re.S)
     assert match, name
     return match.group()
 
 
-def run(code, *arguments):
+def run(code, *arguments, input_text=None):
     result = subprocess.run([BASH, "-c", "set -Eeuo pipefail\nexport PATH=/usr/bin:/bin:$PATH\n" + code, "test", *arguments],
-                            text=True, capture_output=True, encoding="utf-8")
-    assert result.returncode == 0, result.stderr
-    return result.stdout
+                            capture_output=True, input=input_text.encode("utf-8") if input_text is not None else None)
+    assert result.returncode == 0, result.stderr.decode("utf-8")
+    return result.stdout.decode("utf-8")
 
 
 def test_validate_bind_and_ports_reject_shell_input_and_out_of_range():
@@ -130,11 +130,12 @@ test "$code" = 31
 
 @pytest.mark.parametrize("direct_result", [0, 1, 124])
 def test_source_fetch_prefers_github_and_retries_failures_in_separate_directory(tmp_path, direct_result):
-    output = run(function("prepare_source") + r'''
+    output = run(function("valid_github_proxy") + "\n" + function("prepare_source") + r'''
 WORK="$1"; direct_result="$2"; SOURCE=""
 REPO=https://github.com/capret/pera-panel.git; REF=feature/pause
 GITHUB_PROXY=https://ghfast.top/
 load_source() { :; }; info() { :; }; say() { printf '%s\n' "$1"; }
+prompt_github_proxy() { exit 99; }
 die() { echo "$*" >&2; exit 31; }
 clone_source() {
     printf 'fetch %s %s %s\n' "$1" "$REF" "${2##*/}"
@@ -164,7 +165,7 @@ printf 'release %s\n' "${RELEASE_SOURCE##*/}"
 
 @pytest.mark.parametrize("proxy,attempts", [("https://ghfast.top", 2), ("off", 1)])
 def test_failed_fetch_does_not_switch_or_stop_running_release(tmp_path, proxy, attempts):
-    definitions = "\n".join(function(name) for name in ("prepare_source", "update_panel"))
+    definitions = "\n".join(function(name) for name in ("valid_github_proxy", "prepare_source", "update_panel"))
     output = run(definitions + r'''
 WORK="$1"; GITHUB_PROXY="$2"; SOURCE=""
 REPO=https://github.com/capret/pera-panel.git; REF=main
@@ -186,7 +187,7 @@ test "$code" = 31
 
 @pytest.mark.parametrize("proxy", ["http://ghfast.top", "https://user:secret@ghfast.top", "https://ghfast.top/path", "https://ghfast.top?token=secret"])
 def test_invalid_proxy_is_rejected_before_fetch(tmp_path, proxy):
-    run(function("prepare_source") + r'''
+    run(function("valid_github_proxy") + "\n" + function("prepare_source") + r'''
 WORK="$1"; GITHUB_PROXY="$2"; REPO=https://github.com/capret/pera-panel.git; REF=main
 load_source() { :; }; info() { :; }; clone_source() { exit 99; }
 die() { exit 31; }
@@ -254,3 +255,39 @@ die() { echo "$*" >&2; exit 31; }
 prepare_source
 test "$RELEASE_SOURCE" = "$(cd -- "$1" && pwd -P)"
 ''', source.as_posix())
+
+
+@pytest.mark.parametrize("configured,answer,expected", [
+    ("https://ghfast.top", "\n", "https://ghfast.top"),
+    ("https://saved.example", "\n", "https://saved.example"),
+    ("https://ghfast.top", "https://replacement.example:8443/\n", "https://replacement.example:8443"),
+    ("https://ghfast.top", "http://invalid.example\nhttps://replacement.example\n", "https://replacement.example"),
+    ("https://ghfast.top", "https://user:secret@invalid.example\nhttps://invalid.example/path\n\n", "https://ghfast.top"),
+    ("https://ghfast.top", "off\n", "off"),
+])
+def test_proxy_prompt_accepts_default_replacement_or_cancel_and_reprompts_invalid_input(configured, answer, expected):
+    definitions = "\n".join(function(name) for name in ("say", "valid_github_proxy", "prompt_github_proxy"))
+    output = run(definitions + r'''
+LANGUAGE=en; GITHUB_PROXY="$1"
+die() { echo "$*" >&2; exit 31; }
+prompt_github_proxy
+printf 'selected %s\n' "$GITHUB_PROXY"
+''', configured, input_text=answer)
+    assert f"selected {expected}\n" in output
+    assert "Press Enter" in output
+    assert ("Enter an HTTPS origin" in output) == ("invalid.example" in answer)
+
+
+@pytest.mark.parametrize("language,cancelled", [("en", "Proxy fallback cancelled."), ("zh-CN", "已取消代理重试。")])
+def test_proxy_prompt_eof_cancels_without_using_default(language, cancelled):
+    definitions = "\n".join(function(name) for name in ("say", "valid_github_proxy", "prompt_github_proxy"))
+    output = run(definitions + r'''
+LANGUAGE="$1"; GITHUB_PROXY=https://ghfast.top
+die() { printf '%s\n' "$*"; exit 31; }
+set +e
+(prompt_github_proxy; echo continued)
+code=$?
+test "$code" = 31
+''', language, input_text="")
+    assert cancelled in output
+    assert "continued" not in output

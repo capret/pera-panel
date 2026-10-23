@@ -70,7 +70,7 @@ Options:
   --firewall MODE  auto: add UFW rules and enable UFW; manual: leave firewall alone
   --ssh-port PORT  Additional SSH TCP port to preserve (also detects sshd listeners)
   --lang LANGUAGE  en or zh-CN for setup and maintenance menus
-  --yes            Accept setup defaults / noninteractive uninstall confirmation
+  --yes            Accept setup/proxy defaults / noninteractive uninstall confirmation
   --purge          With uninstall: also erase worlds, backups and credentials
 
 Upload the complete project and run: sudo bash install.sh install
@@ -81,6 +81,7 @@ Interactive installation starts with language, bind address, port, and firewall 
 Default: 0.0.0.0:8080, automatic UFW rules. Cloud security groups need provider-side rules.
 PERA_BIND, PERA_PORT, PERA_FIREWALL, PERA_SSH_PORT, and PERA_LANG set defaults.
 PERA_GITHUB_PROXY sets the GitHub fallback; use off for direct access only.
+On direct GitHub failure, interactive runs offer the saved/default proxy or a new URL.
 HELP
 }
 
@@ -331,19 +332,42 @@ clone_source() {
         clone --depth 1 --branch "$REF" -- "$1" "$2"
 }
 
+valid_github_proxy() {
+    [[ "$1" == off || "$1" =~ ^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/?$ ]]
+}
+
+prompt_github_proxy() {
+    local answer candidate
+    say 'Press Enter to use the shown proxy, enter another HTTPS proxy URL, or type off to cancel.' \
+        '按回车使用下方代理，输入其他 HTTPS 代理地址，或输入 off 取消。'
+    while true; do
+        read -r -p "$(say 'GitHub fallback proxy' 'GitHub 备用代理') [$GITHUB_PROXY]: " answer || \
+            die "$(say 'Proxy fallback cancelled.' '已取消代理重试。')"
+        candidate="${answer:-$GITHUB_PROXY}"
+        if valid_github_proxy "$candidate"; then
+            GITHUB_PROXY="${candidate%/}"
+            return 0
+        fi
+        say 'Enter an HTTPS origin without credentials or a path (for example https://ghfast.top), or off.' \
+            '请输入不含账号密码或路径的 HTTPS 地址（例如 https://ghfast.top），或输入 off。'
+    done
+}
+
 prepare_source() {
     load_source
     if [[ -n "$REPO" ]]; then
         [[ "$REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$ ]] || die "--repo must be an HTTPS GitHub repository URL."
         [[ "$REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "Invalid branch or tag."
-        [[ "$GITHUB_PROXY" == off || "$GITHUB_PROXY" =~ ^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/?$ ]] || die "--github-proxy must be an HTTPS origin without credentials or a path, or off."
+        valid_github_proxy "$GITHUB_PROXY" || die "--github-proxy must be an HTTPS origin without credentials or a path, or off."
         GITHUB_PROXY="${GITHUB_PROXY%/}"
         info "Fetching $REPO ($REF)"
         if clone_source "$REPO" "$WORK/source"; then
             RELEASE_SOURCE="$WORK/source"
         elif [[ "$GITHUB_PROXY" != off ]]; then
-            say "Direct GitHub fetch failed or timed out. Retrying through $GITHUB_PROXY…" \
-                "直连 GitHub 失败或超时，正在通过 $GITHUB_PROXY 重试…"
+            say 'Direct GitHub fetch failed or timed out.' '直连 GitHub 失败或超时。'
+            if [[ -t 0 ]] && (( ! YES )); then prompt_github_proxy; fi
+            [[ "$GITHUB_PROXY" != off ]] || die "$(say 'Proxy fallback cancelled.' '已取消代理重试。')"
+            say "Retrying through $GITHUB_PROXY…" "正在通过 $GITHUB_PROXY 重试…"
             # Use a separate directory so an interrupted clone cannot pollute the retry.
             if clone_source "$GITHUB_PROXY/$REPO" "$WORK/source-proxy"; then
                 RELEASE_SOURCE="$WORK/source-proxy"
