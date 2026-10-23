@@ -1,3 +1,4 @@
+import configparser
 import subprocess
 import sys
 import time
@@ -28,6 +29,9 @@ if "-only_update_server_mods" in sys.argv:
         print("Updater EOF received; exiting", flush=True)
     sys.exit(0)
 print("Booted fake DST; token private-test-token", flush=True)
+pause_setting = pathlib.Path(sys.argv[1]).with_suffix(".pause-setting")
+if pause_setting.exists():
+    print("[00:00:01]:   PauseWhenEmpty: " + pause_setting.read_text(), flush=True)
 for line in sys.stdin:
     print(line.strip(), flush=True)
     if line.startswith("c_shutdown"):
@@ -70,6 +74,57 @@ def test_real_pipes_paired_start_save_announce_and_graceful_stop(runtime, tmp_pa
         assert "[redacted]" in log
     assert "c_announce" in runtime.log(world["id"], "Master")
     assert not runtime.active()
+
+
+@pytest.mark.parametrize("pause_when_empty", [True, False])
+def test_start_applies_saved_empty_world_pause_setting(runtime, pause_when_empty):
+    world = validate_world({"name": "Pause", "token": "abc", "pause_when_empty": pause_when_empty})
+    runtime.store.write_world({**world, "pause_when_empty": not pause_when_empty})
+    runtime.start(world)
+    cluster = configparser.ConfigParser()
+    cluster.read(runtime.store.world_path(world["id"]) / "cluster.ini")
+    assert cluster.getboolean("GAMEPLAY", "pause_when_empty") is pause_when_empty
+
+
+def test_loaded_pause_settings_come_from_current_processes_and_reset_on_restart(runtime, tmp_path):
+    world = validate_world({"name": "Pause", "token": "abc", "pause_when_empty": True})
+    for shard, value in (("Master", "false"), ("Caves", "true")):
+        (tmp_path / f"{shard}.pause-setting").write_text(value)
+    runtime.start(world)
+    # Report what each child actually loaded, even if the generated file differs.
+    shards = runtime.status(world["id"])["shards"]
+    assert {s["name"]: s["loaded_pause_when_empty"] for s in shards} == {"Master": False, "Caves": True}
+    old_master = runtime.processes["Master"]
+    runtime.stop()
+    for shard in ("Master", "Caves"):
+        (tmp_path / f"{shard}.pause-setting").unlink()
+    runtime.start(world)
+    runtime._record_pause_setting(old_master, world["id"], "Master", "[00:00:01]: PauseWhenEmpty: true")
+    assert all(s["loaded_pause_when_empty"] is None for s in runtime.status(world["id"])["shards"])
+    assert runtime.status("other-world")["shards"] == []
+    runtime.stop()
+    assert runtime.loaded_pause_settings == {}
+
+
+def test_pause_setting_rejects_embedded_text_updaters_and_other_worlds(service):
+    runtime = Runtime(service.store)
+    identifier = service.create({"name": "Camp"})["world_id"]
+    process = MagicMock()
+    runtime.world_id = identifier
+    runtime.processes = {"Master": process}
+    runtime._record_pause_setting(process, identifier, "Master", "[00:00:01]:   PauseWhenEmpty: true\r\n")
+    for output in (
+        "[00:00:02]: [Say] (KU_abcdefgh) Player: PauseWhenEmpty: false",
+        '[00:00:02]: RemoteCommandInput: "print(\"PauseWhenEmpty: false\")"',
+        "PauseWhenEmpty: false",
+        "[00:00:02]: PauseWhenEmpty: false extra",
+        "[00:00:02]: Server Unpaused",
+    ):
+        runtime._record_pause_setting(process, identifier, "Master", output)
+    runtime._record_pause_setting(process, identifier, "Mods", "[00:00:02]: PauseWhenEmpty: false")
+    runtime._record_pause_setting(process, "other-world", "Master", "[00:00:02]: PauseWhenEmpty: false")
+    assert runtime.loaded_pause_settings == {"Master": True}
+    process.stdin.write.assert_not_called()
 
 
 def test_mod_update_finishes_before_shards_start(runtime):
@@ -255,6 +310,5 @@ def test_console_action_rejected_after_shutdown_input_is_closed(runtime):
     runtime.processes = {"Master": process}
     with pytest.raises(PanelError, match="console disconnected"):
         runtime.command(world["id"], "save")
-    runtime.request_players(world["id"])
     process.stdin.write.assert_not_called()
     runtime.processes = {}

@@ -1,4 +1,5 @@
 import configparser
+import io
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -168,37 +169,46 @@ def test_registry_rejects_invalid_ids_and_does_not_recreate_archived_world(servi
     assert not root.exists()
 
 
-def test_console_response_requires_exact_current_marker_and_safe_folder(service):
+@pytest.mark.parametrize("pause_when_empty", [True, False])
+def test_dashboard_player_refresh_is_passive_and_keeps_log_discovery(client, auth, service, monkeypatch,
+                                                                   pause_when_empty):
     from pera_panel.runtime import Runtime
-    identifier, _ = setup_characters(service)
+    identifier = service.create({"name": "Camp", "caves": True,
+                                 "pause_when_empty": pause_when_empty})["world_id"]
     runtime = Runtime(service.store)
-    runtime.probes[(identifier, "Master")] = "PERA_PLAYERS_current"
-    rows = json.dumps([{"userid": USER, "name": "Player", "folder": "A7ONLINE1234"}])
-    runtime._player_response(identifier, "Master", "[00:01:00]: [Say] PERA_PLAYERS_current" + rows)
-    runtime._player_response(identifier, "Master", "PERA_PLAYERS_old" + rows)
-    assert runtime.players.list(identifier) == []
-    runtime._player_response(identifier, "Master", "[00:01:00]: PERA_PLAYERS_current" + rows)
-    assert runtime.players.list(identifier)[0]["folders"] == {"Master": "A7ONLINE1234"}
-    rows = json.dumps([{"userid": "KU_other123", "folder": "../escape"}])
-    runtime._player_response(identifier, "Master", "PERA_PLAYERS_current" + rows)
-    assert next(p for p in runtime.players.list(identifier) if p["userid"] == "KU_other123")["folders"] == {}
-
-
-def test_player_probe_is_throttled_and_uses_random_markers(service):
-    from pera_panel.runtime import Runtime
-    identifier, _ = setup_characters(service)
-    runtime = Runtime(service.store)
+    runtime.players = service.players
     runtime.world_id = identifier
-    process = MagicMock()
-    process.poll.return_value = None
-    process.stdin.closed = False
-    runtime.processes = {"Master": process}
-    runtime.request_players(identifier)
-    runtime.request_players(identifier)
-    assert process.stdin.write.call_count == 1
-    assert "GetClientTable()" in process.stdin.write.call_args[0][0]
-    assert "EncodeUserPath" not in process.stdin.write.call_args[0][0]
-    assert runtime.probes[(identifier, "Master")].startswith("PERA_PLAYERS_")
+    monkeypatch.setattr(service, "runtime", runtime)
+    for shard in ("Master", "Caves"):
+        process = MagicMock()
+        process.poll.return_value = None
+        process.stdin.closed = False
+        runtime.processes[shard] = process
+
+    endpoint = f"/api/worlds/{identifier}/players"
+    assert runtime.active(identifier)
+    for _ in range(3):
+        assert client.get(endpoint).json == {"players": []}
+
+    # Natural game output still supplies names on both shards, even without
+    # any dashboard request during the join. Leaving preserves known accounts.
+    for shard, process in runtime.processes.items():
+        process.stdout = io.StringIO(
+            f"[02:20:00]: Client authenticated: (KU_{shard}1234) {shard} survivor\n"
+            "[02:21:33]: Server Unpaused\n"
+            f"[02:21:33]: [Leave Announcement] {shard} survivor\n"
+            "[02:21:34]: [Say] (KU_other123) Other: Client authenticated: (KU_fake1234) Fake\n"
+        )
+        path = service.store.logs / identifier / f"{shard}.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        runtime._read_log(process, path, [], identifier, shard)
+    for _ in range(3):
+        rows = client.get(endpoint).json["players"]
+        assert {row["name"] for row in rows} == {"Master survivor", "Caves survivor"}
+        assert all(row["sources"] == ["join"] for row in rows)
+    for process in runtime.processes.values():
+        process.stdin.write.assert_not_called()
+        process.stdin.flush.assert_not_called()
 
 
 def test_repeated_discovery_does_not_rewrite_registry(service, monkeypatch):

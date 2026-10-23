@@ -151,6 +151,7 @@ button:disabled { cursor: not-allowed; }
 .cave-art { background: #f0edf8; color: #786298; }
 .shard .status-tag { margin-left: auto; }
 .shard small { color: var(--muted); }
+.shard-pause-setting { display: block; margin-top: 4px; font-size: 11px; line-height: 1.5; }
 .connection-details { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px 24px; border-top: 1px solid var(--line); padding-top: 20px; margin-top: 22px; }
 .connection-details span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .connection-details strong { font-size: 14px; font-weight: 500; }

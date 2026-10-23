@@ -143,8 +143,15 @@ function render() {
   $('#autostart-value').textContent = t(item.autostart ? 'Yes' : 'No');
   $('#shard-list').innerHTML = ['Master', ...(item.caves ? ['Caves'] : [])].map(name => {
     const shard = runtime.shards.find(s => s.name === name);
-    return `<article class="shard"><div class="shard-art ${name === 'Caves' ? 'cave-art' : ''}">${name === 'Master' ? '♧' : '◇'}</div><div><h3>${t(name === 'Master' ? 'The surface' : 'The caves')}</h3></div><span class="status-tag ${shard?.running ? 'running' : ''}">${shard?.running ? t('Process running') : shard ? t('Exited · {code}', {code: shard.exit_code}) : t('Stopped')}</span></article>`;
+    const pause = shard?.loaded_pause_when_empty;
+    const pauseLabel = pause === true ? 'Empty-world pause: enabled by DST' : pause === false ? 'Empty-world pause: disabled by DST' : 'Empty-world pause: not reported by DST';
+    return `<article class="shard"><div class="shard-art ${name === 'Caves' ? 'cave-art' : ''}">${name === 'Master' ? '♧' : '◇'}</div><div><h3>${t(name === 'Master' ? 'The surface' : 'The caves')}</h3>${shard?.running ? `<small class="shard-pause-setting">${h(pauseLabel)}</small>` : ''}</div><span class="status-tag ${shard?.running ? 'running' : ''}">${shard?.running ? t('Process running') : shard ? t('Exited · {code}', {code: shard.exit_code}) : t('Stopped')}</span></article>`;
   }).join('');
+  const mismatches = runtime.shards.filter(shard => shard.running && typeof shard.loaded_pause_when_empty === 'boolean' && shard.loaded_pause_when_empty !== item.pause_when_empty);
+  const pauseWarning = $('#pause-setting-warning');
+  pauseWarning.hidden = !mismatches.length;
+  const warningText = mismatches.length ? t('Pause setting mismatch on {shards}. DST loaded a different value than saved in World settings. Stop the world, save settings, and start it again; check startup logs if this persists.', {shards:mismatches.map(shard => t(shard.name === 'Master' ? 'Surface' : 'Caves')).join(', ')}) : '';
+  if (pauseWarning.textContent !== warningText) pauseWarning.textContent = warningText;
   I18n.bind($('#activity-list'));
 }
 async function refresh() {

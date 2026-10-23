@@ -205,9 +205,8 @@ def create_app(config, service=None):
 
     @app.get("/api/worlds/<identifier>/players")
     def players(identifier):
-        service.store.get(identifier)
-        if not service.busy:
-            service.runtime.request_players(identifier)
+        # Joins are recorded by the log reader. Dashboard polling must not send
+        # console commands to the game, including when the world is empty.
         return jsonify(players=service.players.list(identifier))
 
     @app.get("/api/worlds/<identifier>/characters")

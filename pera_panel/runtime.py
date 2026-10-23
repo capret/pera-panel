@@ -1,12 +1,10 @@
 """Own the game processes as an unprivileged user, with bounded logs and graceful shutdown."""
 from collections import deque
 from datetime import datetime, timezone
-import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
 import re
-import secrets
 import subprocess
 import threading
 import time
@@ -14,7 +12,10 @@ import time
 import psutil
 
 from .storage import PanelError, lua
-from .players import PlayerRegistry, USER_ID, FOLDER
+from .players import PlayerRegistry
+
+
+PAUSE_SETTING = re.compile(r"^\[[0-9:.]+\]:\s*PauseWhenEmpty:\s*(true|false)\s*$")
 
 
 class Runtime:
@@ -28,8 +29,7 @@ class Runtime:
         self.updater = None
         self.update_context = None
         self.players = PlayerRegistry(store)
-        self.probes = {}
-        self.probe_at = 0
+        self.loaded_pause_settings = {}
 
     def binary(self):
         binary = self.store.game / "bin64" / "dontstarve_dedicated_server_nullrenderer_x64"
@@ -71,9 +71,9 @@ class Runtime:
                                            f"[Pera Panel] {stamp} | {shard} process started (PID {process.pid})",
                                            (), None))
             for output in iter(lambda: process.stdout.readline(65536), ""):
+                self._record_pause_setting(process, identifier, shard, output)
                 try:
                     self.players.log_line(identifier, output, shard)
-                    self._player_response(identifier, shard, output)
                 except (OSError, ValueError):
                     logging.exception("Could not record player discovery")
                 for secret in secrets:
@@ -83,6 +83,15 @@ class Runtime:
         finally:
             process.stdout.close()
             handler.close()
+
+    def _record_pause_setting(self, process, identifier, shard, output):
+        # Only current game processes can report their startup configuration.
+        # Chat text, updater output, and late output from an old run are ignored.
+        match = PAUSE_SETTING.fullmatch(output.rstrip("\r\n"))
+        if match:
+            with self.lock:
+                if self.world_id == identifier and self.processes.get(shard) is process:
+                    self.loaded_pause_settings[shard] = match[1] == "true"
 
     def active(self, identifier=None):
         with self.lock:
@@ -135,8 +144,7 @@ class Runtime:
             self.processes = {}
             self.world_id = world["id"]
             self.started_at = time.time()
-            self.probes = {}
-            self.probe_at = 0
+            self.loaded_pause_settings = {}
             try:
                 for shard in (["Master", "Caves"] if world["caves"] else ["Master"]):
                     self.processes[shard] = self._spawn(
@@ -192,48 +200,6 @@ class Runtime:
             self._send(self.processes["Master"], f"c_rollback({count})", required=True)
         return {"message": "Native rollback requested. Check the game logs for completion; DST reloads the world and players may reconnect."}
 
-    def request_players(self, identifier):
-        with self.lock:
-            if not self.active(identifier) or time.monotonic() - self.probe_at < 10:
-                return
-            self.probe_at = time.monotonic()
-            for shard, process in self.processes.items():
-                if process.poll() is not None or not process.stdin or process.stdin.closed:
-                    continue
-                marker = "PERA_PLAYERS_" + secrets.token_hex(16)
-                self.probes[(identifier, shard)] = marker
-                # Discover identities independently of save-path encoding. Folder recovery uses
-                # existing paths on disk; a failed/unsupported encoding API must not hide accounts.
-                command = ('local p={} for _,v in ipairs(TheNet:GetClientTable() or {}) do '
-                           'if v.performance==nil and #p<64 then '
-                           'p[#p+1]={userid=v.userid,name=string.sub(v.name or "",1,100)} '
-                           'end end print("' + marker + '"..require("json").encode(p))')
-                self._send(process, command)
-
-    def _player_response(self, identifier, shard, output):
-        marker = self.probes.get((identifier, shard))
-        if not marker:
-            return
-        output = re.sub(r"^\[[0-9:.]+\]:\s*", "", output).rstrip("\r\n")
-        if not output.startswith(marker):
-            return
-        try:
-            rows = json.loads(output[len(marker):])
-        except ValueError:
-            return
-        if not isinstance(rows, list) or len(rows) > 64:
-            return
-        players = []
-        for row in rows:
-            if not isinstance(row, dict) or not isinstance(row.get("userid"), str) or not USER_ID.fullmatch(row["userid"]):
-                continue
-            folder = row.get("folder", "")
-            if not isinstance(folder, str) or not FOLDER.fullmatch(folder):
-                folder = ""
-            players.append({"userid": row["userid"], "name": row.get("name", ""), "source": "console",
-                            "folder": folder, "shard": shard})
-        self.players.record_many(identifier, players)
-
     def stop(self, force=False):
         with self.lock:
             processes = list(self.processes.values())
@@ -270,6 +236,7 @@ class Runtime:
             self.processes = {}
             self.world_id = None
             self.started_at = None
+            self.loaded_pause_settings = {}
 
     def status(self, identifier):
         with self.lock:
@@ -284,7 +251,9 @@ class Runtime:
                         except psutil.Error:
                             pass
                     shards.append({"name": name, "running": code is None, "pid": process.pid,
-                                   "exit_code": code, "memory_mb": round(memory / 1024 ** 2, 1)})
+                                   "exit_code": code, "memory_mb": round(memory / 1024 ** 2, 1),
+                                   "loaded_pause_when_empty": self.loaded_pause_settings.get(name)
+                                   if code is None else None})
             count = sum(shard["running"] for shard in shards)
             state = "running" if shards and count == len(shards) else "degraded" if count else "failed" if shards else "stopped"
             update = self.update_context
