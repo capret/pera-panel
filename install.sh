@@ -14,6 +14,8 @@ REF="${PERA_REF:-main}"
 REF_GIVEN=0
 [[ -z "${PERA_REF:-}" ]] || REF_GIVEN=1
 SOURCE=""
+GITHUB_PROXY="${PERA_GITHUB_PROXY:-https://ghfast.top}"
+GITHUB_PROXY_GIVEN=0; [[ -z "${PERA_GITHUB_PROXY:-}" ]] || GITHUB_PROXY_GIVEN=1
 YES=0
 PURGE=0
 WORK=""
@@ -62,6 +64,7 @@ Options:
   --repo URL       Your HTTPS GitHub repository (saved for subsequent updates)
   --ref REF        Branch or tag, default main
   --source PATH    Local checkout/copy on the server (saved for updates)
+  --github-proxy URL|off  HTTPS fallback origin (default https://ghfast.top; saved)
   --bind ADDRESS   Panel IPv4 bind address (default 0.0.0.0)
   --port PORT      Panel TCP port (default 8080, range 1024–65535)
   --firewall MODE  auto: add UFW rules and enable UFW; manual: leave firewall alone
@@ -77,15 +80,17 @@ Or download this script and run:
 Interactive installation starts with language, bind address, port, and firewall settings.
 Default: 0.0.0.0:8080, automatic UFW rules. Cloud security groups need provider-side rules.
 PERA_BIND, PERA_PORT, PERA_FIREWALL, PERA_SSH_PORT, and PERA_LANG set defaults.
+PERA_GITHUB_PROXY sets the GitHub fallback; use off for direct access only.
 HELP
 }
 
 while (($#)); do
     case "$1" in
-        --repo|--ref|--source|--bind|--port|--firewall|--ssh-port|--lang)
+        --repo|--ref|--source|--github-proxy|--bind|--port|--firewall|--ssh-port|--lang)
             (($# >= 2)) || die "$1 requires a value"
             case "$1" in
                 --repo) REPO="$2";; --ref) REF="$2"; REF_GIVEN=1;; --source) SOURCE="$2";;
+                --github-proxy) GITHUB_PROXY="$2"; GITHUB_PROXY_GIVEN=1;;
                 --bind) BIND="$2"; BIND_GIVEN=1;; --port) PORT="$2"; PORT_GIVEN=1;;
                 --firewall) FIREWALL="$2"; FIREWALL_GIVEN=1;; --ssh-port) SSH_PORT="$2";; --lang) LANGUAGE="$2";;
             esac
@@ -109,6 +114,7 @@ load_source() {
         REF="${PERA_REF:-${SAVED_REF:-main}}"
         (( ! REF_GIVEN )) || REF="$requested_ref"
         SOURCE="${requested_source:-${SAVED_SOURCE:-}}"
+        (( GITHUB_PROXY_GIVEN )) || GITHUB_PROXY="${SAVED_GITHUB_PROXY:-https://ghfast.top}"
     fi
     if [[ -n "$requested_source" ]]; then
         REPO=""  # An explicit local source overrides the saved remote.
@@ -317,14 +323,36 @@ download_game() {
     steam_links "$destination"
 }
 
+clone_source() {
+    # Bound each public fetch and disable interactive authentication.
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false timeout --signal=TERM --kill-after=5s 120s \
+        git -c core.hooksPath=/dev/null -c credential.helper= -c http.extraHeader= \
+        -c http.lowSpeedLimit=1024 -c http.lowSpeedTime=20 \
+        clone --depth 1 --branch "$REF" -- "$1" "$2"
+}
+
 prepare_source() {
     load_source
     if [[ -n "$REPO" ]]; then
         [[ "$REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$ ]] || die "--repo must be an HTTPS GitHub repository URL."
         [[ "$REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "Invalid branch or tag."
+        [[ "$GITHUB_PROXY" == off || "$GITHUB_PROXY" =~ ^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/?$ ]] || die "--github-proxy must be an HTTPS origin without credentials or a path, or off."
+        GITHUB_PROXY="${GITHUB_PROXY%/}"
         info "Fetching $REPO ($REF)"
-        git -c core.hooksPath=/dev/null clone --depth 1 --branch "$REF" -- "$REPO" "$WORK/source"
-        RELEASE_SOURCE="$WORK/source"
+        if clone_source "$REPO" "$WORK/source"; then
+            RELEASE_SOURCE="$WORK/source"
+        elif [[ "$GITHUB_PROXY" != off ]]; then
+            say "Direct GitHub fetch failed or timed out. Retrying through $GITHUB_PROXY…" \
+                "直连 GitHub 失败或超时，正在通过 $GITHUB_PROXY 重试…"
+            # Use a separate directory so an interrupted clone cannot pollute the retry.
+            if clone_source "$GITHUB_PROXY/$REPO" "$WORK/source-proxy"; then
+                RELEASE_SOURCE="$WORK/source-proxy"
+            else
+                die "GitHub and proxy fetches failed. Check the repository/ref and network, or use --source /path/to/checkout."
+            fi
+        else
+            die "GitHub fetch failed and the proxy fallback is disabled. Retry or use --github-proxy https://ghfast.top."
+        fi
         SOURCE=""
     else
         [[ -n "$SOURCE" && -f "$SOURCE/pera_panel/web.py" ]] || die "Provide the full project using --source /path/to/project or --repo https://github.com/YOU/pera-panel.git"
@@ -352,6 +380,7 @@ prepare_release() {
 
 save_source() {
     printf 'SAVED_REPO=%q\nSAVED_REF=%q\nSAVED_SOURCE=%q\n' "$REPO" "$REF" "$SOURCE" > "$CONFIG/source.env"
+    printf 'SAVED_GITHUB_PROXY=%q\n' "$GITHUB_PROXY" >> "$CONFIG/source.env"
     chown root:root "$CONFIG/source.env"
     chmod 600 "$CONFIG/source.env"
 }

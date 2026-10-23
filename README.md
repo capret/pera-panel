@@ -51,6 +51,25 @@ sudo bash install.sh install --repo https://github.com/capret/pera-panel.git --r
 
 The repository URL and branch/tag are saved for future updates. Only public HTTPS GitHub repositories are supported by the remote installer. For a private repository, clone it yourself on the server and use `--source /absolute/path/to/checkout`.
 
+Remote installs and console updates try GitHub directly first. If the clone fails or times out, they retry the same repository and branch/tag through [ghfast.top](https://ghfast.top/), which documents HTTPS Git clone support. Each attempt has a two-minute limit and stops after 20 seconds of transfer below 1 KiB/s. The proxy receives the public repository URL and supplies the downloaded source; Git credential helpers and authentication prompts are disabled for these public fetches. The original GitHub URL remains the saved source, so the next update tries GitHub first again. Local `--source` updates do not use the proxy.
+
+The fallback preference is saved after a successful deployment. Override it with `PERA_GITHUB_PROXY` or `--github-proxy` (an HTTPS origin without credentials/path, or `off`):
+
+```bash
+sudo pera-panel update-panel --github-proxy https://ghfast.top
+sudo pera-panel update-panel --github-proxy off
+```
+
+An older installed manager does not know this option. To bootstrap it when direct GitHub access fails, download the new installer through the bridge and run it:
+
+```bash
+curl -fL --connect-timeout 15 --max-time 120 --proto '=https' --proto-redir '=https' \
+  https://ghfast.top/https://raw.githubusercontent.com/capret/pera-panel/main/install.sh -o install.sh
+sudo bash install.sh update-panel --repo https://github.com/capret/pera-panel.git --ref main
+```
+
+Source fetching and release preparation finish before the running panel is stopped. If both fetches fail, the current release keeps running.
+
 The familiar single-command form is also supported:
 
 ```bash
