@@ -12,6 +12,7 @@ import tempfile
 import uuid
 
 from .runtime import Runtime
+from .maintenance import Maintenance
 from .archives import Archives
 from .players import PlayerRegistry, USER_ID
 from .save_import import stage_save
@@ -32,6 +33,8 @@ class Service:
         self.busy = None
         self.closing = False
         self.resume_after_operation = None
+        self.maintenance = Maintenance()
+        self.shutdown_event = threading.Event()
         self.jobs_file = self.store.root / "jobs.json"
         self.jobs = json.loads(self.jobs_file.read_text()) if self.jobs_file.exists() else []
         for job in self.jobs:
@@ -44,6 +47,7 @@ class Service:
 
     def submit(self, title, operation, *, world_id=None):
         with self.lock:
+            self.maintenance.require_idle()
             if self.closing or self.busy:
                 raise PanelError("Another operation is in progress. Wait for it to finish.", 409)
             job = {"id": uuid.uuid4().hex, "title": title, "state": "queued",
@@ -91,6 +95,14 @@ class Service:
         with self.lock:
             return [dict(job) for job in reversed(self.jobs)
                     if identifier is None or job.get("world_id") == identifier]
+
+    def update_software(self, target):
+        with self.lock:
+            if self.closing or self.busy or self.upload_lock.locked():
+                raise PanelError("Another operation or upload is in progress. Wait for it to finish.", 409)
+            if self.runtime.active():
+                raise PanelError("Stop all worlds before updating software.", 409)
+            return self.maintenance.start(target)
 
     def require_stopped(self, identifier):
         if self.runtime.active(identifier):
@@ -233,6 +245,7 @@ class Service:
         # Hold the operation lock only while preparing an independent temporary ZIP.
         # A queued start, restore, or deletion cannot change these files mid-export.
         with self.lock:
+            self.maintenance.require_idle()
             if self.busy or self.closing:
                 raise PanelError("Another operation is in progress. Wait for it to finish.", 409)
             world = self.store.get(identifier)
@@ -347,6 +360,29 @@ class Service:
         return self.archives.delete(identifier, confirmation)
 
     def autostart(self):
+        if (self.maintenance.status()["job"] or {}).get("state") == "running":
+            threading.Thread(target=self._autostart_after_update, daemon=True,
+                             name="pera-update-resume").start()
+            return
+        self._autostart()
+
+    def _autostart_after_update(self):
+        # The updater waits for HTTP health before marking completion, so never
+        # block the server's startup thread here. Failed updates leave DST stopped.
+        while not self.shutdown_event.wait(2):
+            status = self.maintenance.status()
+            if not status["available"] or (status["job"] or {}).get("state") == "running":
+                continue
+            if (status["job"] or {}).get("state") == "completed":
+                try:
+                    with self.lock:
+                        if not self.closing and not self.busy and not self.runtime.active():
+                            self._autostart()
+                except Exception:
+                    logging.exception("Could not resume world after software update")
+            return
+
+    def _autostart(self):
         resume_file = self.store.root / "resume.json"
         if resume_file.exists():
             identifier = json.loads(resume_file.read_text()).get("world_id")
@@ -360,6 +396,7 @@ class Service:
 
     def close(self):
         self.closing = True
+        self.shutdown_event.set()
         resume_id = self.runtime.world_id if self.runtime.active() else self.resume_after_operation
         if resume_id:
             write_json(self.store.root / "resume.json", {"world_id": resume_id})

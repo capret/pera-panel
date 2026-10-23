@@ -6,6 +6,7 @@ const h = (key, params = {}) => `<span data-i18n-message="${escapeHTML(JSON.stri
 let state = null, selected = null, currentTab = 'overview', mods = [], confirmCallback = null, polling = false;
 let importTarget = null, uploading = false, currentPage = 'server';
 let downloadingSave = false;
+let watchedUpdate = null;
 let archivedWorlds = [], archivesLoading = false;
 let playerWorld = null, playerRows = [], characterRows = [], characterWorld = null, playerPolling = false, playerPollAt = 0;
 const seenJobs = new Set();
@@ -81,9 +82,39 @@ function renderActivity(selector, jobs, global = false) {
   }).join('') || `<p class="muted quiet-empty">${h('No activity for this view yet.')}</p>`;
   I18n.bind($(selector));
 }
+function updateTitle(job) { return job.target === 'game' ? 'Update game' : 'Update panel'; }
+function renderUpdates() {
+  const maintenance = state.maintenance || {}, job = maintenance.job;
+  const running = state.worlds.some(w => ['running','degraded'].includes(w.runtime.state) || w.runtime.mod_update);
+  document.querySelectorAll('[data-update]').forEach(button => {
+    button.disabled = !maintenance.available || Boolean(state.busy) || running || uploading || downloadingSave;
+  });
+  $('#update-setup').hidden = maintenance.available || job?.state === 'running';
+  I18n.text('#update-guidance', !maintenance.available ? (job?.state === 'running' ? 'Waiting for the updater to reconnect…' : 'The updater is unavailable. Install the update service from the server console first.') : job?.state === 'running' ? 'Update in progress. Keep this page open; it will reconnect automatically.' : running ? 'Stop all worlds before updating software.' : 'Ready to update.');
+  $('#update-progress').hidden = !job;
+  if (job) {
+    I18n.text('#update-status', '{job}: {state}', {job:msg(updateTitle(job)),state:msg(job.state)});
+    const log = $('#update-log');
+    const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 60;
+    log.textContent = job.log || '';
+    if (atBottom) log.scrollTop = log.scrollHeight;
+    if (job.state === 'failed') I18n.text('#update-guidance', 'Update failed. Review the output below before retrying.');
+  }
+}
+function trackUpdate() {
+  const job = state.maintenance?.job;
+  if (job?.state === 'running') { watchedUpdate = job.id; state.busy ||= job.id; }
+  else if (job && watchedUpdate === job.id) {
+    watchedUpdate = null;
+    toast(job.state === 'completed' ? 'Software update completed.' : 'Update failed. Review the output below before retrying.', job.state !== 'completed');
+    // Fetch the newly installed frontend once after this page observed the update.
+    if (job.target === 'panel' && job.state === 'completed') location.reload();
+  }
+}
 function render() {
   if (!state) return;
   const item = world();
+  renderUpdates();
   renderArchives();
   $('#install-notice').hidden = state.game_installed;
   $('#empty-state').hidden = currentPage !== 'server' || state.worlds.length > 0;
@@ -119,7 +150,8 @@ function render() {
   $('#metric-memory').textContent = state.host.memory_used_gb + ' GB';
   $('#metric-memory-note').textContent = t('of {total} GB · {percent}% used', {total: state.host.memory_total_gb, percent: state.host.memory_percent});
   $('#metric-disk').textContent = state.host.disk_free_gb + ' GB';
-  const busy = state.jobs.find(job => job.id === state.busy);
+  const update = state.maintenance?.job;
+  const busy = state.jobs.find(job => job.id === state.busy) || (update?.state === 'running' ? {title:updateTitle(update)} : null);
   $('#open-import').disabled = Boolean(busy) || uploading;
   $('#download-save').disabled = !item || downloadingSave || Boolean(state.busy) || Boolean(runtime?.mod_update) || ['running','degraded'].includes(runtime?.state);
   I18n.text('#download-save', downloadingSave ? 'Preparing save ZIP…' : '↓ Download save ZIP');
@@ -128,6 +160,7 @@ function render() {
   $('#busy-message').textContent = updating ? t('Updating mods for {world} ({shard})…', {world:updating.name,shard:msg(updating.runtime.mod_update.shard === 'Master' ? 'Surface' : 'Caves')}) : busy ? t('{job}… Other changes are paused. See logs for progress.', {job: msg(busy.title)}) : '';
   $('#view-mod-downloads').hidden = !updating;
   $('#view-mod-downloads').dataset.worldId = updating?.id || '';
+  document.querySelectorAll('#sidebar-create, #add-world, #empty-create, #save-mods, #settings-form button[type="submit"], #create-form button[type="submit"]').forEach(button => { button.disabled = Boolean(state.busy); });
   document.querySelectorAll('[data-action]').forEach(button => {
     const action = button.dataset.action;
     const active = runtime && ['running','degraded'].includes(runtime.state);
@@ -160,6 +193,7 @@ async function refresh() {
   try {
     const first = !state;
     state = await api('/status');
+    trackUpdate();
     $('#connection-error').hidden = true;
     if (first) await navigate(location.pathname, {replace:true});
     else if (selected && !world()) await navigate('/overview', {replace:true});
@@ -181,7 +215,7 @@ async function refresh() {
     if (currentTab === 'logs' && selected) await loadLogs();
     if (selected) await loadPlayers();
   } catch (error) {
-    $('#connection-error').textContent = t('Connection interrupted: {error}', {error: msg(I18n.error(error))});
+    $('#connection-error').textContent = watchedUpdate ? t('Software update in progress. The panel is temporarily offline; reconnecting automatically…') : t('Connection interrupted: {error}', {error: msg(I18n.error(error))});
     $('#connection-error').hidden = false;
   } finally { polling = false; }
 }
@@ -382,6 +416,15 @@ document.addEventListener('click', async event => {
     if (target.id === 'open-archives') await navigate('/archives');
     if (target.id === 'refresh-archives') await loadArchives();
     if (target.id === 'download-save') await downloadSave();
+    if (target.dataset.update) {
+      const updateTarget = target.dataset.update;
+      confirmAction(updateTarget === 'game' ? 'Update game?' : 'Update panel?', 'The panel will restart during this update. Saved worlds and settings are kept. Worlds with Start at boot enabled will start after success. Continue?', '', '', async () => {
+        const result = await api('/maintenance', 'POST', {target:updateTarget});
+        state.maintenance = result.maintenance;
+        trackUpdate();
+        render();
+      });
+    }
     if (target.id === 'view-mod-downloads') {
       await navigate(`/worlds/${target.dataset.worldId}/logs`);
       $('#log-shard').value = 'Mods';

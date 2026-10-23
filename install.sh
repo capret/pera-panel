@@ -395,7 +395,7 @@ prepare_release() {
     cp -R -- "$RELEASE_SOURCE/deploy" "$RELEASE/deploy"
     python3 -m venv "$RELEASE/.venv"
     "$RELEASE/.venv/bin/pip" install --disable-pip-version-check -r "$RELEASE/requirements.txt"
-    "$RELEASE/.venv/bin/python" -m compileall -q "$RELEASE/pera_panel"
+    "$RELEASE/.venv/bin/python" -m compileall -q "$RELEASE/pera_panel" "$RELEASE/deploy/maintenance.py"
     (cd "$RELEASE" && "$RELEASE/.venv/bin/python" -c 'from pera_panel.web import create_app; import waitress, psutil')
     chown -R root:root "$RELEASE"
     chmod -R go-w "$RELEASE"
@@ -417,6 +417,14 @@ write_manager() {
 exec bash /usr/local/lib/pera-panel/install.sh "$@"
 WRAPPER
     chmod 755 /usr/local/bin/pera-panel
+    install -m 644 "$RELEASE/deploy/maintenance.py" "$MANAGER/maintenance.py.next"
+    mv -f "$MANAGER/maintenance.py.next" "$MANAGER/maintenance.py"
+    install -m 644 "$RELEASE/deploy/pera-panel-maintenance.socket" /etc/systemd/system/pera-panel-maintenance.socket
+    install -m 644 "$RELEASE/deploy/pera-panel-maintenance.service" /etc/systemd/system/pera-panel-maintenance.service
+    systemctl daemon-reload
+    # Do not restart the helper: it may be running this very update. It reloads
+    # itself when idle; its socket and progress survive a panel restart.
+    systemctl enable --now pera-panel-maintenance.socket
 }
 
 switch_release() {
@@ -475,6 +483,18 @@ switch_release() {
 
 installed() { [[ -f "$CONFIG/config.json" && -d "$APP/current" ]] || die "Install Pera Panel first."; }
 
+lock_maintenance() {
+    if [[ "${PERA_MAINTENANCE_LOCK_FD:-}" =~ ^[0-9]+$ ]]; then
+        # The browser helper keeps this same lock through recovery and health checks.
+        exec 9>&"$PERA_MAINTENANCE_LOCK_FD"
+        if [[ "$PERA_MAINTENANCE_LOCK_FD" != 9 ]]; then exec {PERA_MAINTENANCE_LOCK_FD}>&-; fi
+        unset PERA_MAINTENANCE_LOCK_FD
+    else
+        exec 9>/run/lock/pera-panel-maintenance.lock
+    fi
+    flock -n 9 || die "Another maintenance operation is already running."
+}
+
 install_all() {
     dependencies
     prepare_release
@@ -529,12 +549,15 @@ uninstall_panel() {
     fi
     stop_panel
     systemctl disable pera-panel.service 2>/dev/null || true
+    systemctl disable --now pera-panel-maintenance.socket 2>/dev/null || true
+    systemctl stop pera-panel-maintenance.service 2>/dev/null || true
+    rm -f -- /etc/systemd/system/pera-panel-maintenance.socket /etc/systemd/system/pera-panel-maintenance.service
     rm -f -- /etc/systemd/system/pera-panel.service /usr/local/bin/pera-panel
     # Fixed absolute application paths only. Persistent data has a separate, explicit purge path.
     rm -rf -- /opt/pera-panel /usr/local/lib/pera-panel
     systemctl daemon-reload
     if (( PURGE )); then
-        rm -rf -- /var/lib/pera-panel /etc/pera-panel
+        rm -rf -- /var/lib/pera-panel /var/lib/pera-panel-maintenance /etc/pera-panel
         if id pera-panel >/dev/null 2>&1; then userdel pera-panel; fi
         info "Software, worlds, backups and credentials removed."
     else
@@ -586,8 +609,7 @@ case "$COMMAND" in
 esac
 if (( PURGE )) && [[ "$COMMAND" != uninstall ]]; then die "--purge is only valid with uninstall."; fi
 if [[ "$COMMAND" != status && "$COMMAND" != logs ]]; then
-    exec 9>/run/lock/pera-panel-maintenance.lock
-    flock -n 9 || die "Another maintenance operation is already running."
+    lock_maintenance
 fi
 WORK="$(mktemp -d /tmp/pera-panel.XXXXXXXX)"
 case "$COMMAND" in

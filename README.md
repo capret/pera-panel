@@ -13,6 +13,7 @@ A self-hosted **Don’t Starve Together** server manager for **Ubuntu 22.04+ / D
 - Makes consistent backups after stopping both shards; restores both together and creates a safety backup first.
 - Replaces a world from an uploaded local save ZIP, optionally inheriting Workshop mod settings (on by default).
 - Updates or reinstalls software while preserving worlds, backups, and admin credentials.
+- Triggers game and panel updates from **Server overview → Software updates**, with update output and automatic reconnection.
 - Uses a generated admin password, hashed credentials, CSRF protection, login throttling, and an unprivileged systemd service.
 - Supports Simplified Chinese and English on the login page and throughout the dashboard. The language selector remembers your preference in this browser and preserves unsaved form edits. The initial language follows your browser; world names, custom backup labels, mod option keys, and raw game logs remain unchanged.
 
@@ -41,6 +42,16 @@ sudo bash install.sh install --yes --bind 0.0.0.0 --port 8080 --firewall auto --
 The panel port must be 1024–65535. Setup currently accepts IPv4 bind addresses. To change networking after installation, run `sudo pera-panel configure` or select **13) Network setup / 网络设置**. Your administrator credentials remain unchanged.
 
 Keep the uploaded source directory: panel updates reuse it. Upload changed code there, then run `sudo pera-panel update-panel`.
+
+## Updates from the dashboard
+
+Open **Server overview → Software updates** and choose **Update game** or **Update panel**. Stop running worlds first and wait for other operations/uploads to finish. Confirm the update; the panel disconnects while its service restarts and reconnects automatically. Update output and the final result survive that restart. Saved worlds, settings, backups, and credentials are preserved. Worlds with **Start at boot** enabled start only after an update succeeds; a failed update leaves them stopped. If the download fails, the updater still attempts to restart the panel and reports the failure.
+
+An existing installation needs one console update to install this capability. Pull the latest project and run `sudo bash install.sh update-panel` from that checkout. New installations enable it automatically. Local development without systemd shows setup guidance and disables the buttons.
+
+Browser panel updates use the root-owned saved source, branch/tag and fallback proxy. GitHub sources fetch the configured ref; local sources redeploy the saved directory, so pull/upload new code there first. Browser updates run without terminal prompts and automatically use the saved proxy if direct GitHub access fails. Change these preferences with the console updater flags below.
+
+The web service remains unprivileged with `NoNewPrivileges=true`. A separate socket-activated root service accepts only the two fixed update actions from the panel's Unix account (or root); requests cannot supply commands, URLs, branches, paths, or installer arguments. It shares the console installer's maintenance lock through update and recovery. Root-owned progress is stored in `/var/lib/pera-panel-maintenance/job.json`; diagnostics are also available with `sudo journalctl -u pera-panel-maintenance`. Installation/uninstallation manages its socket and service together with the panel.
 
 ## Install from your GitHub repository
 

@@ -143,12 +143,20 @@ def create_app(config, service=None):
         worlds = [{**service.store.public(world), "runtime": service.runtime.status(world["id"])}
                   for world in service.store.all()]
         return jsonify(version=__version__, worlds=worlds, jobs=service.job_list(), busy=service.busy,
+                       maintenance=service.maintenance.status(),
                        host={"cpu_percent": psutil.cpu_percent(), "memory_percent": memory.percent,
                              "memory_used_gb": round(memory.used / 1024**3, 1),
                              "memory_total_gb": round(memory.total / 1024**3, 1),
                              "disk_free_gb": round(disk.free / 1024**3, 1)},
                        game_installed=(service.store.game / "bin64" /
                                        "dontstarve_dedicated_server_nullrenderer_x64").is_file())
+
+    @app.post("/api/maintenance")
+    def maintenance():
+        data = body()
+        if set(data) != {"target"} or data["target"] not in ("panel", "game"):
+            raise PanelError("Choose a game or panel update.")
+        return jsonify(maintenance=service.update_software(data["target"])), 202
 
     @app.post("/api/workshop/details")
     def workshop_details():
@@ -255,8 +263,10 @@ def create_app(config, service=None):
     @app.post("/api/worlds/<identifier>/import-save")
     def import_save(identifier):
         current = service.store.get(identifier)
-        if service.busy or service.closing or not service.upload_lock.acquire(blocking=False):
-            raise PanelError("Another operation or upload is in progress. Wait for it to finish.", 409)
+        with service.lock:
+            service.maintenance.require_idle()
+            if service.busy or service.closing or not service.upload_lock.acquire(blocking=False):
+                raise PanelError("Another operation or upload is in progress. Wait for it to finish.", 409)
         temporary = None
         try:
             confirmation = request.form.get("confirmation", "")

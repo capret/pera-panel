@@ -39,6 +39,35 @@ valid_port 65535
 ''')
 
 
+def test_browser_lock_is_adopted_and_extra_descriptor_closed(tmp_path):
+    run(function("lock_maintenance") + r'''
+exec 7>"$1"
+PERA_MAINTENANCE_LOCK_FD=7
+flock() { test "$*" = '-n 9'; }
+die() { exit 99; }
+lock_maintenance
+test -z "${PERA_MAINTENANCE_LOCK_FD:-}"
+printf 'held' >&9
+if (printf 'leaked' >&7) 2>/dev/null; then exit 98; fi
+''', (tmp_path / "lock").as_posix())
+    assert (tmp_path / "lock").read_text() == "held"
+
+
+def test_manager_installs_socket_without_restarting_active_helper():
+    output = run(r'''
+RELEASE=/release; MANAGER=/manager
+install() { printf 'install %s\n' "$*"; }
+mv() { printf 'mv %s\n' "$*"; }
+chmod() { :; }
+cat() { command cat >/dev/null; }
+systemctl() { printf 'systemctl %s\n' "$*"; }
+''' + '\n' + function("write_manager").replace(
+        "cat > /usr/local/bin/pera-panel", "cat") + '\nwrite_manager\n')
+    assert "maintenance.py.next" in output
+    assert "systemctl enable --now pera-panel-maintenance.socket" in output
+    assert "systemctl restart" not in output
+
+
 def test_game_user_commands_use_accessible_home_not_callers_directory(tmp_path):
     home = tmp_path / "game home"
     home.mkdir()

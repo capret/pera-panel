@@ -1,0 +1,12 @@
+[Unit]
+Description=Pera Panel update requests
+
+[Socket]
+ListenStream=/run/pera-panel-maintenance.sock
+SocketUser=root
+SocketGroup=pera-panel
+SocketMode=0660
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

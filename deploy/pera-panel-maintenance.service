@@ -1,0 +1,17 @@
+[Unit]
+Description=Pera Panel software updater
+Requires=pera-panel-maintenance.socket
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/
+ExecStart=/usr/bin/python3 -I /usr/local/lib/pera-panel/maintenance.py
+StateDirectory=pera-panel-maintenance
+StateDirectoryMode=0700
+UMask=0077
+PrivateTmp=true
+KillMode=control-group
+TimeoutStopSec=180
