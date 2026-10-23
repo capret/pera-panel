@@ -13,6 +13,12 @@ window.WorldSettings = (() => {
     field('season_start','Starting season','Layout', [['winter','Winter'],['spring','Spring'],['summer','Summer'],['autumn|spring','Autumn or spring'],['winter|summer','Winter or summer'],['autumn|winter|spring|summer','Random']], ['master_overrides'], 'Autumn'),
     ...[['autumn','Autumn length'],['winter','Winter length'],['spring','Spring length'],['summer','Summer length']].map(([key,label]) => field(key,label,'Seasons & day cycle',seasons,['master_overrides'], ['autumn','spring'].includes(key) ? '20 days' : '15 days')),
     field('day','Day / dusk / night','Seasons & day cycle', [['longday','Long day'],['longdusk','Long dusk'],['longnight','Long night'],['noday','No day'],['nodusk','No dusk'],['nonight','No night'],['onlyday','Only day'],['onlydusk','Only dusk'],['onlynight','Only night']], ['master_overrides'], 'Seasonal'),
+    field('specialevent','Automatic seasonal events','Events & festivals', [['none','Disabled']], ['master_overrides'], 'Follow DST’s current event'),
+    ...[['crow_carnival','Midsummer Cawnival'],['hallowed_nights','Hallowed Nights'],['winters_feast','Winter’s Feast'],
+      ['year_of_the_gobbler','Year of the Gobbler'],['year_of_the_varg','Year of the Varg'],['year_of_the_pig','Year of the Pig'],
+      ['year_of_the_carrat','Year of the Carrat'],['year_of_the_beefalo','Year of the Beefalo'],['year_of_the_catcoon','Year of the Catcoon'],
+      ['year_of_the_bunnyman','Year of the Bunnyman'],['year_of_the_dragonfly','Year of the Dragonfly']]
+      .map(([key,label]) => field(key,label,'Events & festivals',[['enabled','Always enabled']],['master_overrides'],'Use automatic event setting')),
     ...[['grass','Grass'],['sapling','Saplings'],['berrybush','Berry bushes'],['trees','Trees'],['rock','Boulders'],['flint','Flint']].map(([key,label]) => field(key,label,'Resources',amount)),
     ...[['mushtree','Mushroom trees'],['flower_cave','Light flowers']].map(([key,label]) => field(key,label,'Resources',amount,['caves_overrides'])),
     field('spiders','Spider dens','Creatures & attacks',amount),
@@ -20,7 +26,7 @@ window.WorldSettings = (() => {
     ...[['bunnymen','Bunny hutches'],['rocky','Rock lobsters'],['cave_spiders','Cave spider dens']].map(([key,label]) => field(key,label,'Creatures & attacks',amount,['caves_overrides'])),
     ...[['hounds','Hound attacks'],['deerclops','Deerclops']].map(([key,label]) => field(key,label,'Creatures & attacks',frequency,['master_overrides'])),
   ];
-  const groups = ['Layout','Seasons & day cycle','Resources','Creatures & attacks'];
+  const groups = ['Layout','Seasons & day cycle','Events & festivals','Resources','Creatures & attacks'];
   const shardNames = {master_overrides:'Surface',caves_overrides:'Caves'};
   const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const message = (key, params = {}) => `data-i18n-message="${escape(JSON.stringify({key,params}))}"`;
@@ -74,10 +80,10 @@ window.WorldSettings = (() => {
       <p class="notice" data-i18n>${creating ? 'Choose these settings before the first start, when DST generates the world.' : 'These are the panel’s saved generation choices, not readings from the live save. Configure them before the first start. Existing terrain will not regenerate, and imported saves may use different settings.'}</p>
       ${both.map(shard => `<details class="world-shard" data-world-shard="${shard}" ${shard === 'master_overrides' ? 'open' : ''}>
         <summary><span data-i18n>${shardNames[shard]}</span><small data-world-summary></small></summary>
-        ${shard === 'caves_overrides' ? '<p class="field-help" data-i18n>Seasons and the day cycle are controlled by the Surface.</p>' : ''}
+        ${shard === 'caves_overrides' ? '<p class="field-help" data-i18n>Seasons, the day cycle, and events are controlled by the Surface.</p>' : ''}
         ${groups.map(group => {
           const fields = catalog.filter(item => item.group === group && item.shards.includes(shard));
-          return fields.length ? `<details class="world-option-group" ${group === 'Layout' ? 'open' : ''}><summary data-i18n>${group}</summary><div class="form-grid">${fields.map(option => `<label><span data-i18n>${option.label}</span><select data-world-option="${option.key}"></select></label>`).join('')}</div></details>` : '';
+          return fields.length ? `<details class="world-option-group" ${group === 'Layout' ? 'open' : ''}><summary data-i18n>${group}</summary>${group === 'Events & festivals' ? '<p class="field-help" data-i18n>Automatic events follow the current event in your installed DST version. Always enabled keeps a festival active even when automatic events are disabled. Multiple festivals can be enabled together. To turn all events off, disable automatic events and leave every festival at Default.</p>' : ''}<div class="form-grid">${fields.map(option => `<label><span data-i18n>${option.label}</span><select data-world-option="${option.key}"></select></label>`).join('')}</div></details>` : '';
         }).join('')}
         <p class="notice error" data-world-error hidden data-i18n>Fix the advanced JSON object to use the controls or save these settings.</p>
         <details class="world-option-group"><summary data-i18n>Advanced overrides (JSON)</summary><p class="field-help" data-i18n>Both editors share the same settings. Unknown options and custom values are kept. Select Default to remove an override.</p><label><span data-i18n>${shard === 'master_overrides' ? 'Surface overrides' : 'Caves overrides'}</span><textarea class="code-input" name="${shard}" rows="6" spellcheck="false">${escape(JSON.stringify(world[shard] || {}, null, 2))}</textarea></label></details>

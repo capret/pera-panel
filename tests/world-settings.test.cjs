@@ -57,3 +57,24 @@ test('every control and choice has a Chinese translation', () => {
     }
   }
 });
+
+test('festival overrides are global and independent of automatic events', () => {
+  const events = catalog.filter(item => item.group === 'Events & festivals');
+  assert.ok(events.some(item => item.key === 'specialevent'));
+  for (const event of events) {
+    assert.deepEqual(plain(event.shards), ['master_overrides']);
+    assert.equal(choices(event, {}).selected, 'default');
+    assert.deepEqual(plain(event.choices.map(([value]) => value)), [event.key === 'specialevent' ? 'none' : 'enabled']);
+  }
+  let settings = change({custom_mod_event:true}, 'winters_feast', 'enabled');
+  settings = change(settings, 'hallowed_nights', 'enabled');
+  settings = change(settings, 'specialevent', 'none');
+  assert.deepEqual(plain(settings), {custom_mod_event:true,winters_feast:'enabled',hallowed_nights:'enabled',specialevent:'none'});
+  settings = change(settings, 'winters_feast', 'default');
+  assert.equal(Object.hasOwn(settings, 'winters_feast'), false);
+  assert.equal(settings.hallowed_nights, 'enabled');
+  assert.equal(settings.specialevent, 'none');
+  const automatic = events.find(item => item.key === 'specialevent');
+  assert.equal(choices(automatic, {specialevent:'winters_feast'}).selected, '__custom__');
+  assert.equal(change({specialevent:'winters_feast'},'hallowed_nights','enabled').specialevent,'winters_feast');
+});

@@ -11,7 +11,8 @@ from test_web import wait_job
 
 def test_creation_overrides_are_saved_per_shard_and_preserved_on_other_edits(client, auth, service):
     surface = {"world_size": "huge", "season_start": "winter", "winter": "longseason",
-               "day": "longday", "grass": "often", "hounds": "never", "custom_mod_option": {"enabled": True}}
+               "day": "longday", "grass": "often", "hounds": "never", "custom_mod_option": {"enabled": True},
+               "specialevent": "none", "winters_feast": "enabled", "hallowed_nights": "enabled"}
     caves = {"world_size": "small", "rock": "often", "bunnymen": "rare", "custom_seed": 12345}
     response = client.post("/api/worlds", headers=auth, json={"name": "Configured camp",
                            "master_overrides": surface, "caves_overrides": caves})
