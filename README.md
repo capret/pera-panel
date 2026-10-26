@@ -45,7 +45,7 @@ Keep the uploaded source directory: panel updates reuse it. Upload changed code 
 
 ## Updates from the dashboard
 
-Open **Server overview → Software updates** and choose **Update game** or **Update panel**. Stop running worlds first and wait for other operations/uploads to finish. Confirm the update; the panel disconnects while its service restarts and reconnects automatically. Update output and the final result survive that restart. Saved worlds, settings, backups, and credentials are preserved. Worlds with **Start at boot** enabled start only after an update succeeds; a failed update leaves them stopped. If the download fails, the updater still attempts to restart the panel and reports the failure.
+Open **Server overview → Software updates** and choose **Update game** or **Update panel**. Stop running worlds first and wait for other operations/uploads to finish. Browser game updates keep the panel online so you can follow SteamCMD output; worlds remain stopped until you start them. Panel updates disconnect while the service restarts, then reconnect automatically. Update output and the final result survive that restart. Saved worlds, settings, backups, and credentials are preserved. Worlds with **Start at boot** enabled start after a successful panel update; a failed update leaves them stopped. The updater checks that the panel is available even after a failed download. Console game updates still stop/restart the panel to shut down any running worlds safely.
 
 An existing installation needs one console update to install this capability. Pull the latest project and run `sudo bash install.sh update-panel` from that checkout. New installations enable it automatically. Local development without systemd shows setup guidance and disables the buttons.
 
@@ -93,7 +93,7 @@ Only execute installer code from a repository you trust. This installer requires
 
 ## Open the panel and create your first world
 
-With the default setup, open `http://YOUR_SERVER_IP:8080`. The bind address `0.0.0.0` means all local IPv4 interfaces; it is not the address to enter in your browser. For a cloud VPS, allow TCP 8080 and the game UDP ports in the provider’s security group/firewall as well.
+After installation or an update, open the actual URL printed by the installer. A specific bind address is used directly. With the default `0.0.0.0` bind, the installer first looks for a public IPv4 in the SSH server address and local interfaces. If the server only has private addresses, it makes a bounded HTTPS request to [ipify](https://www.ipify.org/) to detect the public egress IPv4, bypassing HTTP proxies. If detection fails, it prints a clearly labeled local network URL, or explains that no address could be detected; a lookup failure does not fail the installation. The bind address `0.0.0.0` means all local IPv4 interfaces; it is not a browser destination. Address detection does not verify inbound reachability: NAT may need port forwarding, and a cloud VPS still needs TCP 8080 (or your configured port) and the game UDP ports allowed in its security group/firewall.
 
 If you choose a loopback bind (`127.0.0.1`), keep this SSH tunnel running from **your computer**:
 

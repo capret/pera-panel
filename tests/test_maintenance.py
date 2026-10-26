@@ -62,6 +62,10 @@ def test_update_requires_idle_stopped_world_and_no_upload(client, auth, service,
     assert not service.upload_lock.locked()
     assert client.post("/api/maintenance", json={"target": "panel"}, headers=auth).status_code == 409
     assert client.get("/api/status").json["maintenance"]["job"]["state"] == "running"
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/overview").status_code == 200
+    updater_client["job"]["log"] = "SteamCMD download: 42%"
+    assert client.get("/api/status").json["maintenance"]["job"]["log"] == "SteamCMD download: 42%"
     updater_client["job"]["state"] = "completed"
     assert client.post("/api/worlds", json={"name": "Allowed"}, headers=auth).status_code == 202
 

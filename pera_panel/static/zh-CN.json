@@ -673,7 +673,6 @@
   "Stop all worlds before updating software.": "更新软件前，请先停止所有世界。",
   "Software updates": "软件更新",
   "Update DST or Pera Panel on this server.": "更新此服务器上的饥荒联机版或 Pera Panel。",
-  "Stop all worlds first. The panel will briefly disconnect and reconnect automatically. Worlds with Start at boot enabled will start after a successful update.": "请先停止所有世界。面板将短暂断开，并自动重新连接。启用了开机启动的世界将在更新成功后启动。",
   "Update game": "更新游戏",
   "Update panel": "更新面板",
   "Enable browser updates": "启用网页更新",
@@ -689,5 +688,8 @@
   "Software update in progress. The panel is temporarily offline; reconnecting automatically…": "正在更新软件，面板暂时离线，正在自动重新连接…",
   "Update game?": "更新游戏？",
   "Update panel?": "更新面板？",
-  "The panel will restart during this update. Saved worlds and settings are kept. Worlds with Start at boot enabled will start after success. Continue?": "面板将在更新期间重启，世界存档和设置会保留。启用了开机启动的世界将在更新成功后启动。是否继续？"
+  "The panel will restart during this update. Saved worlds and settings are kept. Worlds with Start at boot enabled will start after success. Continue?": "面板将在更新期间重启，世界存档和设置会保留。启用了开机启动的世界将在更新成功后启动。是否继续？",
+  "Stop all worlds first. Game updates keep the panel online and worlds stopped. Panel updates reconnect automatically and start worlds with Start at boot enabled after success.": "请先停止所有世界。更新游戏时面板保持在线，世界保持停止。更新面板后会自动重连，并在成功后启动启用了开机启动的世界。",
+  "Updating game. The panel stays online; see Update output for progress.": "正在更新游戏，面板保持在线。请查看更新输出了解进度。",
+  "Update DST with SteamCMD? The panel stays online and shows progress. Saved worlds and settings are kept. Worlds remain stopped until you start them.": "使用 SteamCMD 更新饥荒？面板将保持在线并显示进度，世界存档和设置会保留。更新后请手动启动世界。"
 }

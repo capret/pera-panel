@@ -47,10 +47,131 @@ flock() { test "$*" = '-n 9'; }
 die() { exit 99; }
 lock_maintenance
 test -z "${PERA_MAINTENANCE_LOCK_FD:-}"
+test "$BROWSER_UPDATE" = 1
 printf 'held' >&9
 if (printf 'leaked' >&7) 2>/dev/null; then exit 98; fi
 ''', (tmp_path / "lock").as_posix())
     assert (tmp_path / "lock").read_text() == "held"
+
+
+@pytest.mark.parametrize("address,public", [("93.184.216.34", True), ("10.0.0.4", False),
+                                           ("192.168.1.8", False), ("172.20.2.5", False),
+                                           ("100.64.0.2", False)])
+def test_panel_ipv4_distinguishes_public_and_local_addresses(address, public):
+    run(function("usable_panel_ipv4") + '\nusable_panel_ipv4 "$1"\n' +
+        ('usable_panel_ipv4 "$1" public\n' if public else '! usable_panel_ipv4 "$1" public\n'), address)
+
+
+@pytest.mark.parametrize("address", ["", "0.0.0.0", "0.1.2.3", "127.0.0.1", "169.254.169.254",
+                                     "224.1.2.3", "255.255.255.255", "300.1.2.3", "::1",
+                                     "<html>unavailable</html>", "1.2.3.4;echo injected"])
+def test_panel_ipv4_rejects_invalid_or_unusable_lookup_output(address):
+    run(function("usable_panel_ipv4") + '\n! usable_panel_ipv4 "$1"\n! usable_panel_ipv4 "$1" public\n', address)
+
+
+def test_local_address_candidates_use_ssh_server_and_primary_route_first():
+    output = run(function("local_panel_ipv4s") + r'''
+SSH_CONNECTION='8.8.8.8 54500 10.0.0.5 22'
+ip() {
+    if [[ "$*" == '-4 route get 1.1.1.1' ]]; then
+        printf '1.1.1.1 via 10.0.0.1 dev eth0 src 10.0.0.5 uid 0\n'
+    else
+        printf '2: eth0 inet 10.0.0.5/24 brd 10.0.0.255 scope global eth0\n'
+        printf '3: eth1 inet 93.184.216.34/24 scope global eth1\n'
+    fi
+}
+local_panel_ipv4s
+''')
+    assert output.splitlines() == ["10.0.0.5", "10.0.0.5", "10.0.0.5", "93.184.216.34"]
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+def test_access_url_uses_public_local_address_without_external_lookup(language):
+    definitions = '\n'.join(function(name) for name in ("say", "usable_panel_ipv4", "print_panel_access"))
+    output = run(definitions + r'''
+BIND=0.0.0.0; PORT=18080; LANGUAGE="$1"
+local_panel_ipv4s() { printf '10.0.0.5\n93.184.216.34\n'; }
+curl() { echo unexpected-lookup; return 1; }
+print_panel_access
+''', language)
+    assert "http://93.184.216.34:18080" in output
+    assert "unexpected-lookup" not in output and "SERVER_PUBLIC_IP" not in output
+
+
+@pytest.mark.parametrize("bind", ["93.184.216.34", "192.168.1.20", "127.0.0.1"])
+def test_explicit_and_loopback_binds_keep_the_actual_destination(bind):
+    definitions = '\n'.join(function(name) for name in ("say", "print_panel_access"))
+    output = run(definitions + r'''
+BIND="$1"; PORT=18080; LANGUAGE=en
+local_panel_ipv4s() { exit 99; }
+curl() { exit 98; }
+print_panel_access
+''', bind)
+    assert f"http://{bind}:18080" in output
+    assert ("SSH tunnel" in output) == bind.startswith("127.")
+
+
+@pytest.mark.parametrize("reply,exit_code,expected", [
+    ("93.184.216.34", 0, "http://93.184.216.34:8080"),
+    ("", 28, "Local network URL: http://10.0.0.5:8080"),
+    ("<html>blocked</html>", 0, "Local network URL: http://10.0.0.5:8080"),
+    ("127.0.0.1", 0, "Local network URL: http://10.0.0.5:8080"),
+    ("10.0.0.6", 0, "Local network URL: http://10.0.0.5:8080"),
+])
+def test_nat_public_lookup_is_bounded_and_failure_keeps_install_successful(reply, exit_code, expected):
+    definitions = '\n'.join(function(name) for name in ("say", "usable_panel_ipv4", "print_panel_access"))
+    output = run(definitions + r'''
+BIND=0.0.0.0; PORT=8080; LANGUAGE=en; reply="$1"; result="$2"
+local_panel_ipv4s() { printf '10.0.0.5\n172.17.0.1\n'; }
+curl() {
+    [[ "$*" == *'--ipv4 --noproxy *'* ]] || exit 98
+    [[ "$*" == *'--connect-timeout 2 --max-time 4 --max-filesize 64'* ]] || exit 98
+    [[ "${!#}" == https://api.ipify.org ]] || exit 98
+    printf '%s' "$reply"
+    return "$result"
+}
+print_panel_access
+echo deployment-succeeded
+''', reply, str(exit_code))
+    assert expected in output
+    assert "deployment-succeeded" in output and "http://0.0.0.0" not in output
+    assert "blocked" not in output
+
+
+def test_no_address_is_reported_clearly_without_fake_url():
+    definitions = '\n'.join(function(name) for name in ("say", "usable_panel_ipv4", "print_panel_access"))
+    output = run(definitions + r'''
+BIND=0.0.0.0; PORT=8080; LANGUAGE=en
+local_panel_ipv4s() { :; }; curl() { return 28; }
+print_panel_access
+echo success
+''')
+    assert "Could not detect" in output and "8080" in output and "success" in output
+    assert "http://" not in output
+
+
+@pytest.mark.parametrize("browser", [0, 1])
+@pytest.mark.parametrize("download_result", [0, 7])
+def test_game_update_keeps_browser_online_but_stops_worlds_for_console(browser, download_result):
+    output = run(function("update_game") + r'''
+BROWSER_UPDATE="$1"; APP=/test-game; download_result="$2"
+installed() { :; }; steam_bootstrap() { :; }; say() { printf '%s\n' "$1"; }
+systemctl() { printf 'service %s\n' "$*"; }
+download_game() { echo downloading; return "$download_result"; }
+print_panel_access() { echo access-url; }
+set +e
+(set -e; update_game)
+code=$?
+test "$code" = "$download_result"
+''', str(browser), str(download_result))
+    assert "downloading" in output
+    if browser:
+        assert "service " not in output
+        assert "keeping the panel online" in output
+    else:
+        assert output.index("service stop pera-panel.service") < output.index("downloading")
+        assert ("service start pera-panel.service" in output) == (download_result == 0)
+    assert ("access-url" in output) == (download_result == 0)
 
 
 def test_manager_installs_socket_without_restarting_active_helper():

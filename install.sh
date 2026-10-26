@@ -28,6 +28,7 @@ BIND_GIVEN=0; [[ -z "${PERA_BIND:-}" ]] || BIND_GIVEN=1
 PORT_GIVEN=0; [[ -z "${PERA_PORT:-}" ]] || PORT_GIVEN=1
 FIREWALL_GIVEN=0; [[ -z "${PERA_FIREWALL:-}" ]] || FIREWALL_GIVEN=1
 NETWORK_SETUP=0
+BROWSER_UPDATE=0
 
 say() { if [[ "$LANGUAGE" == zh-CN ]]; then printf '%s\n' "$2"; else printf '%s\n' "$1"; fi; }
 
@@ -157,6 +158,64 @@ valid_bind() {
     [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
     IFS=. read -r -a octets <<< "$1"
     for octet in "${octets[@]}"; do (( 10#$octet <= 255 )) || return 1; done
+}
+
+usable_panel_ipv4() {
+    python3 - "$1" "${2:-local}" <<'PY'
+import ipaddress
+import sys
+try:
+    address = ipaddress.IPv4Address(sys.argv[1])
+except ValueError:
+    sys.exit(1)
+usable = not (address.is_loopback or address.is_link_local or address.is_multicast
+              or address.is_reserved or address.is_unspecified or int(address) >> 24 == 0)
+sys.exit(0 if usable and (sys.argv[2] != "public" or address.is_global) else 1)
+PY
+}
+
+local_panel_ipv4s() {
+    local _client_ip _client_port server_ip _server_port
+    if [[ -n "${SSH_CONNECTION:-}" ]]; then
+        read -r _client_ip _client_port server_ip _server_port <<< "$SSH_CONNECTION"
+        printf '%s\n' "$server_ip"
+    fi
+    # Route lookup only consults the kernel; it does not contact this destination.
+    ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<NF; i++) if ($i == "src") print $(i+1)}' || true
+    ip -4 -o addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]}' || true
+}
+
+print_panel_access() {
+    local address candidates local_address=""
+    if [[ "$BIND" == 127.* ]]; then
+        printf 'SSH tunnel: ssh -L %s:%s:%s USER@SERVER\nhttp://127.0.0.1:%s\n' "$PORT" "$BIND" "$PORT" "$PORT"
+        return
+    fi
+    if [[ "$BIND" != 0.0.0.0 ]]; then
+        say "Open http://$BIND:$PORT (bind address: $BIND)." "打开 http://$BIND:$PORT（监听地址：$BIND）。"
+        return
+    fi
+    candidates="$(local_panel_ipv4s)"
+    while IFS= read -r address; do
+        if usable_panel_ipv4 "$address" public; then
+            say "Open http://$address:$PORT (bind address: $BIND)." "打开 http://$address:$PORT（监听地址：$BIND）。"
+            return
+        fi
+        if [[ -z "$local_address" ]] && usable_panel_ipv4 "$address"; then local_address="$address"; fi
+    done <<< "$candidates"
+    # Cloud VMs often have only private NIC addresses. Look up the direct public
+    # egress IPv4, bypassing HTTP proxies; failed detection must not fail deployment.
+    if address="$(curl --disable --ipv4 --noproxy '*' --fail --silent --connect-timeout 2 --max-time 4 \
+        --max-filesize 64 --proto '=https' https://api.ipify.org 2>/dev/null)" && usable_panel_ipv4 "$address" public; then
+        say "Open http://$address:$PORT (detected public IPv4; bind address: $BIND)." \
+            "打开 http://$address:$PORT（检测到的公网 IPv4；监听地址：$BIND）。"
+    elif [[ -n "$local_address" ]]; then
+        say "Public IPv4 unavailable. Local network URL: http://$local_address:$PORT" \
+            "未能检测到公网 IPv4。局域网地址：http://$local_address:$PORT"
+    else
+        say "Could not detect a server IPv4 address. Check your cloud console or network settings; panel port: $PORT." \
+            "未能检测到服务器 IPv4 地址。请查看云服务器控制台或网络设置；面板端口：$PORT。"
+    fi
 }
 
 ssh_ports() {
@@ -473,11 +532,7 @@ switch_release() {
     save_source
     write_manager
     info "Panel ready. World data: $DATA"
-    if [[ "$BIND" == 127.* ]]; then
-        printf 'SSH tunnel: ssh -L %s:%s:%s USER@SERVER\nhttp://127.0.0.1:%s\n' "$PORT" "$BIND" "$PORT" "$PORT"
-    else
-        say "Open http://SERVER_PUBLIC_IP:$PORT (bind address: $BIND)." "打开 http://服务器公网IP:$PORT（监听地址：$BIND）。"
-    fi
+    print_panel_access
     say 'Run sudo pera-panel to reopen the maintenance menu.' '运行 sudo pera-panel 可再次打开维护菜单。'
 }
 
@@ -489,6 +544,7 @@ lock_maintenance() {
         exec 9>&"$PERA_MAINTENANCE_LOCK_FD"
         if [[ "$PERA_MAINTENANCE_LOCK_FD" != 9 ]]; then exec {PERA_MAINTENANCE_LOCK_FD}>&-; fi
         unset PERA_MAINTENANCE_LOCK_FD
+        BROWSER_UPDATE=1
     else
         exec 9>/run/lock/pera-panel-maintenance.lock
     fi
@@ -513,9 +569,17 @@ update_panel() {
 update_game() {
     installed
     steam_bootstrap
-    systemctl stop pera-panel.service
+    # The browser has already checked that worlds and other operations are stopped.
+    # Keep its progress page alive; console updates still stop any active world.
+    if (( BROWSER_UPDATE )); then
+        say 'Updating DST while keeping the panel online. Worlds will remain stopped.' \
+            '更新饥荒期间面板保持在线，世界将保持停止状态。'
+    else
+        systemctl stop pera-panel.service
+    fi
     download_game "$APP/game"
-    systemctl start pera-panel.service
+    if (( ! BROWSER_UPDATE )); then systemctl start pera-panel.service; fi
+    print_panel_access
 }
 
 reinstall() {

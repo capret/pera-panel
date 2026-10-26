@@ -90,7 +90,8 @@ function renderUpdates() {
     button.disabled = !maintenance.available || Boolean(state.busy) || running || uploading || downloadingSave;
   });
   $('#update-setup').hidden = maintenance.available || job?.state === 'running';
-  I18n.text('#update-guidance', !maintenance.available ? (job?.state === 'running' ? 'Waiting for the updater to reconnect…' : 'The updater is unavailable. Install the update service from the server console first.') : job?.state === 'running' ? 'Update in progress. Keep this page open; it will reconnect automatically.' : running ? 'Stop all worlds before updating software.' : 'Ready to update.');
+  const progressMessage = job?.target === 'game' ? 'Updating game. The panel stays online; see Update output for progress.' : 'Update in progress. Keep this page open; it will reconnect automatically.';
+  I18n.text('#update-guidance', !maintenance.available ? (job?.state === 'running' ? 'Waiting for the updater to reconnect…' : 'The updater is unavailable. Install the update service from the server console first.') : job?.state === 'running' ? progressMessage : running ? 'Stop all worlds before updating software.' : 'Ready to update.');
   $('#update-progress').hidden = !job;
   if (job) {
     I18n.text('#update-status', '{job}: {state}', {job:msg(updateTitle(job)),state:msg(job.state)});
@@ -215,7 +216,7 @@ async function refresh() {
     if (currentTab === 'logs' && selected) await loadLogs();
     if (selected) await loadPlayers();
   } catch (error) {
-    $('#connection-error').textContent = watchedUpdate ? t('Software update in progress. The panel is temporarily offline; reconnecting automatically…') : t('Connection interrupted: {error}', {error: msg(I18n.error(error))});
+    $('#connection-error').textContent = watchedUpdate && state?.maintenance?.job?.target === 'panel' ? t('Software update in progress. The panel is temporarily offline; reconnecting automatically…') : t('Connection interrupted: {error}', {error: msg(I18n.error(error))});
     $('#connection-error').hidden = false;
   } finally { polling = false; }
 }
@@ -418,7 +419,8 @@ document.addEventListener('click', async event => {
     if (target.id === 'download-save') await downloadSave();
     if (target.dataset.update) {
       const updateTarget = target.dataset.update;
-      confirmAction(updateTarget === 'game' ? 'Update game?' : 'Update panel?', 'The panel will restart during this update. Saved worlds and settings are kept. Worlds with Start at boot enabled will start after success. Continue?', '', '', async () => {
+      const description = updateTarget === 'game' ? 'Update DST with SteamCMD? The panel stays online and shows progress. Saved worlds and settings are kept. Worlds remain stopped until you start them.' : 'The panel will restart during this update. Saved worlds and settings are kept. Worlds with Start at boot enabled will start after success. Continue?';
+      confirmAction(updateTarget === 'game' ? 'Update game?' : 'Update panel?', description, '', '', async () => {
         const result = await api('/maintenance', 'POST', {target:updateTarget});
         state.maintenance = result.maintenance;
         trackUpdate();

@@ -27,7 +27,7 @@
     <section id="server-overview" class="overview-grid" hidden>
       <section class="card software-updates" aria-labelledby="software-title">
         <div class="card-heading"><div><h2 id="software-title" data-i18n>Software updates</h2><p data-i18n>Update DST or Pera Panel on this server.</p></div></div>
-        <p class="field-help" data-i18n>Stop all worlds first. The panel will briefly disconnect and reconnect automatically. Worlds with Start at boot enabled will start after a successful update.</p>
+        <p class="field-help" data-i18n>Stop all worlds first. Game updates keep the panel online and worlds stopped. Panel updates reconnect automatically and start worlds with Start at boot enabled after success.</p>
         <div class="form-actions"><button class="button" data-update="game" data-i18n>Update game</button><button class="button" data-update="panel" data-i18n>Update panel</button></div>
         <p id="update-guidance" class="field-help" role="status"></p>
         <details id="update-setup" class="help-disclosure" hidden><summary data-i18n>Enable browser updates</summary><p data-i18n>Pull the latest project on the server, then run this once from that checkout:</p><pre><code>sudo bash install.sh update-panel</code></pre></details>
