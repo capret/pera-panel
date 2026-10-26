@@ -116,6 +116,8 @@ Public binding uses HTTP until you configure a TLS reverse proxy; use HTTPS or t
 
 The **Server overview / 服务器概览** at `/overview` contains host resources, all worlds, and panel-wide activity. Each world has direct routes: `/worlds/<id>/overview`, `/settings`, `/mods`, `/backups`, and `/logs` (the last four share the same `/worlds/<id>` prefix). Tabs support bookmarks, page reloads, and browser Back/Forward. Archived worlds are managed at `/archives`.
 
+Software update output and live shard/mod logs display as plain text. Terminal color/reset codes, titles and cursor controls are hidden, and carriage-return progress output is separated into readable lines. Stored logs remain unchanged; the display cleanup also applies to output saved by older versions.
+
 New jobs keep their world ID and name, including failed jobs and archive deletion. A world's overview shows only its own jobs. Older history without a world ID remains visible on the server overview; it is never guessed to belong to the currently selected world.
 
 ## Network ports

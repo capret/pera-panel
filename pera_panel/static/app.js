@@ -97,7 +97,7 @@ function renderUpdates() {
     I18n.text('#update-status', '{job}: {state}', {job:msg(updateTitle(job)),state:msg(job.state)});
     const log = $('#update-log');
     const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 60;
-    log.textContent = job.log || '';
+    log.textContent = LogOutput.plainText(job.log);
     if (atBottom) log.scrollTop = log.scrollHeight;
     if (job.state === 'failed') I18n.text('#update-guidance', 'Update failed. Review the output below before retrying.');
   }
@@ -401,7 +401,7 @@ async function loadLogs() {
   const output = $('#log-output');
   const atBottom = output.scrollTop + output.clientHeight >= output.scrollHeight - 60;
   if (data.log === 'No output yet. Start this world to see its logs.') I18n.text(output, data.log);
-  else output.textContent = data.log;
+  else output.textContent = LogOutput.plainText(data.log);
   if (atBottom) output.scrollTop = output.scrollHeight;
 }
 document.addEventListener('click', async event => {
