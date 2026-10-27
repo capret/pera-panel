@@ -5,11 +5,11 @@ A self-hosted **Don’t Starve Together** server manager for **Ubuntu 22.04+ / D
 ## What it does
 
 - Creates separate saved worlds with surface and optional caves. **One world runs at a time**, using fixed ports.
-- Starts, gracefully stops, restarts, saves, and announces to the game.
+- Starts, gracefully stops, restarts, saves, pauses/resumes, and announces to the game.
 - Configures name, password, game mode, player slots, PvP, pause when empty, world generation, and startup at boot.
 - Adds/enables/disables Steam Workshop mods and edits their configuration options as JSON. Both shards receive the same mod configuration.
 - Manages in-game administrators (OP), banned users, and whitelisted users by Klei ID.
-- Shows process status, exit codes, uptime, game memory, host resources, recent operations, and rotating shard/mod logs.
+- Shows process status, DST-reported pause state, exit codes, uptime, game memory, host resources, recent operations, and rotating shard/mod logs.
 - Makes consistent backups after stopping both shards; restores both together and creates a safety backup first.
 - Replaces a world from an uploaded local save ZIP, optionally inheriting Workshop mod settings (on by default).
 - Updates or reinstalls software while preserving worlds, backups, and admin credentials.
@@ -245,7 +245,11 @@ Adjacent `Resuming user` and ownership lines in saved/imported logs can provide 
 
 ## Pausing an empty world
 
-**World settings → Pause when empty** is enabled by default and is written to `[GAMEPLAY] pause_when_empty` in `cluster.ini` before startup. To change it, stop the world, save settings, and start it again. The panel's **Running** badge means the shard processes are alive; it does not measure whether game time is paused.
+**World settings → Pause when empty** is enabled by default and is written to `[GAMEPLAY] pause_when_empty` in `cluster.ini` before startup. To change it, stop the world, save settings, and start it again. The panel's **Running** badge means the shard processes are alive. A separate pause badge shows the latest state reported by DST: **Paused**, **Automatically paused**, or **Unpaused**. The world list and individual shard cards also show this state. Different shard states and stopped shards are identified separately.
+
+**World overview → Game controls → Pause world / Resume world** sends native pause requests to both configured shards (surface only if caves are disabled). All configured shards must be running. The operation waits up to 10 seconds for each shard to report the requested state; an ignored command or a shard exit is reported as a failure, never treated as a confirmed pause. Resume clears manual pausing; DST can still automatically pause an empty world. Controls do not change the saved **Pause when empty** setting.
+
+Pause status comes from native `Server Paused`, `Server Autopaused`, and `Server Unpaused` log events, without console polling. **Pause state unknown** means this run has not reported a state yet; startup settings and process health are not used to guess. Readings reset when processes restart and ignore old processes, mod downloaders, chat, and echoed commands. This reports DST's pause mechanism, not an independent measurement of the world clock or mod-specific time controls. The native events and `TheNet:SetServerPaused` API are visible in [DST's game scripts](https://github.com/taichunmin/dont-starve-together-game-scripts/blob/master/mainfunctions.lua). Some dedicated-server versions/configurations have been [reported to ignore pause requests](https://kleiforums.com/klei-bug-tracker/dont-starve-together/cannot-pause-server-r43934/); if confirmation fails, inspect both shard logs and test the installed game build.
 
 **World overview → Server shards** also shows the setting each current game process reports in its startup `PauseWhenEmpty: true/false` line. A warning appears if either shard reports a different value from the saved panel setting. Missing output is shown as **not reported by DST**, not assumed to be enabled. Readings reset on restart and come only from the current shard processes, not old logs or mod downloaders. This verifies the loaded configuration, not whether the simulation is currently paused. Klei documents this option in its [dedicated server settings guide](https://kleiforums.com/forums/topic/64552-dedicated-server-settings-guide/).
 

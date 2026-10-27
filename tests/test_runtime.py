@@ -34,6 +34,8 @@ if pause_setting.exists():
     print("[00:00:01]:   PauseWhenEmpty: " + pause_setting.read_text(), flush=True)
 for line in sys.stdin:
     print(line.strip(), flush=True)
+    if line.startswith("TheNet:SetServerPaused"):
+        print("[00:00:02]: Server " + ("Paused" if "true" in line else "Unpaused"), flush=True)
     if line.startswith("c_shutdown"):
         print("Shutting down", flush=True)
         if pathlib.Path(sys.argv[1]).with_suffix(".wait-eof").exists():
@@ -74,6 +76,28 @@ def test_real_pipes_paired_start_save_announce_and_graceful_stop(runtime, tmp_pa
         assert "[redacted]" in log
     assert "c_announce" in runtime.log(world["id"], "Master")
     assert not runtime.active()
+
+
+def test_pause_and_resume_wait_for_real_pipe_events_and_reset_on_restart(runtime):
+    world = validate_world({"name": "Pause controls", "token": "abc", "caves": True})
+    runtime.store.write_world(world)
+    runtime.start(world)
+    assert runtime.status(world["id"])["pause_state"] == "unknown"
+    assert "paused" in runtime.command(world["id"], "pause")["message"]
+    assert runtime.status(world["id"])["pause_state"] == "paused"
+    assert all(s["pause_state"] == "paused" for s in runtime.status(world["id"])["shards"])
+    assert "unpaused" in runtime.command(world["id"], "resume")["message"]
+    assert runtime.status(world["id"])["pause_state"] == "unpaused"
+    for shard in ("Master", "Caves"):
+        assert "TheNet:SetServerPaused(true)" in runtime.log(world["id"], shard)
+        assert "TheNet:SetServerPaused(false)" in runtime.log(world["id"], shard)
+    old_master = runtime.processes["Master"]
+    runtime.stop()
+    assert runtime.pause_states == {}
+    assert runtime.status(world["id"])["pause_state"] == "stopped"
+    runtime.start(world)
+    runtime._record_pause_state(old_master, world["id"], "Master", "[00:00:01]: Server Paused")
+    assert runtime.status(world["id"])["pause_state"] == "unknown"
 
 
 @pytest.mark.parametrize("pause_when_empty", [True, False])

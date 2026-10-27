@@ -691,5 +691,21 @@
   "The panel will restart during this update. Saved worlds and settings are kept. Worlds with Start at boot enabled will start after success. Continue?": "面板将在更新期间重启，世界存档和设置会保留。启用了开机启动的世界将在更新成功后启动。是否继续？",
   "Stop all worlds first. Game updates keep the panel online and worlds stopped. Panel updates reconnect automatically and start worlds with Start at boot enabled after success.": "请先停止所有世界。更新游戏时面板保持在线，世界保持停止。更新面板后会自动重连，并在成功后启动启用了开机启动的世界。",
   "Updating game. The panel stays online; see Update output for progress.": "正在更新游戏，面板保持在线。请查看更新输出了解进度。",
-  "Update DST with SteamCMD? The panel stays online and shows progress. Saved worlds and settings are kept. Worlds remain stopped until you start them.": "使用 SteamCMD 更新饥荒？面板将保持在线并显示进度，世界存档和设置会保留。更新后请手动启动世界。"
+  "Update DST with SteamCMD? The panel stays online and shows progress. Saved worlds and settings are kept. Worlds remain stopped until you start them.": "使用 SteamCMD 更新饥荒？面板将保持在线并显示进度，世界存档和设置会保留。更新后请手动启动世界。",
+  "Pause world": "暂停世界",
+  "Resume world": "继续世界",
+  "Paused": "已暂停",
+  "Automatically paused": "已自动暂停",
+  "Unpaused": "未暂停",
+  "Shards differ": "分片暂停状态不同",
+  "Some shards stopped": "部分分片已停止",
+  "Pause state unknown": "暂停状态未知",
+  "Waiting for DST to report a pause state. Process running does not mean game time is advancing.": "等待游戏报告暂停状态。进程运行不代表游戏时间正在推进。",
+  "Pause status follows DST log events. Pause and Resume apply to both shards; automatic empty-world pausing still applies.": "暂停状态来自游戏日志事件。暂停和继续会应用到地表及洞穴；空服自动暂停仍然有效。",
+  "Start all configured shards before pausing or resuming the world.": "请先启动所有已配置的分片，再暂停或继续世界。",
+  "A shard stopped before the pause change was confirmed. Check the shard logs.": "确认暂停状态变化前，某个分片已停止。请检查分片日志。",
+  "DST did not confirm the pause change on every shard. Check the shard logs; the game may have ignored the command.": "游戏未确认所有分片的暂停状态变化。请检查分片日志，游戏可能忽略了指令。",
+  "Manual pause is cleared. DST still reports an automatic pause.": "手动暂停已解除。游戏仍报告处于自动暂停状态。",
+  "DST confirmed the world is paused.": "游戏已确认世界暂停。",
+  "DST confirmed the world is unpaused.": "游戏已确认世界未暂停。"
 }

@@ -126,6 +126,11 @@ button:disabled { cursor: not-allowed; }
 .status-tag::before { content: ''; width: 6px; height: 6px; background: currentColor; border-radius: 50%; }
 .status-tag.running, .status-tag[data-state="running"] { color: #166534; background: #eaf8ee; }
 .status-tag[data-state="failed"], .status-tag[data-state="degraded"] { color: #a3440c; background: #fff2df; }
+.status-tag[data-state="paused"], .status-tag[data-state="auto_paused"] { color: #915b0a; background: #fff3d6; }
+.status-tag[data-state="unpaused"] { color: #166534; background: #eaf8ee; }
+.status-tag[data-state="mixed"], .status-tag[data-state="partial"] { color: #a3440c; background: #fff2df; }
+.shard-status { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: auto; }
+.shard-status .status-tag { white-space: normal; }
 .server-world-row { width: 100%; padding: 17px 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 0; border-top: 1px solid var(--line); text-align: left; color: var(--ink); background: transparent; }
 .server-world-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .server-world-row:hover strong { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 3px; }

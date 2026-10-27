@@ -28,6 +28,9 @@ function toast(message, error = false) {
   toast.timer = setTimeout(() => { $('#toast').hidden = true; }, error ? 12000 : 6000);
 }
 function world() { return state?.worlds.find(item => item.id === selected); }
+function pauseLabel(value) {
+  return {paused:'Paused',auto_paused:'Automatically paused',unpaused:'Unpaused',mixed:'Shards differ',partial:'Some shards stopped',stopped:'Stopped'}[value] || 'Pause state unknown';
+}
 function worldURL() { if (!selected) throw new I18n.Error('Select a world first.'); return '/worlds/' + selected; }
 function duration(seconds) { return seconds < 60 ? t('{seconds}s', {seconds}) : seconds < 3600 ? t('{minutes}m', {minutes: Math.floor(seconds / 60)}) : t('{hours}h {minutes}m', {hours: Math.floor(seconds / 3600), minutes: Math.floor(seconds % 3600 / 60)}); }
 function date(value) { return new Date(value).toLocaleString(I18n.locale, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}); }
@@ -123,6 +126,9 @@ function render() {
   $('#server-metrics').hidden = currentPage !== 'server';
   $('#archives-page').hidden = currentPage !== 'archives';
   $('#world-state').hidden = !item;
+  $('#world-pause-state').hidden = !item || !['running','degraded'].includes(item.runtime.state);
+  $('#world-pause-state').textContent = t(pauseLabel(item?.runtime.pause_state));
+  $('#world-pause-state').dataset.state = item?.runtime.pause_state || 'unknown';
   $('#world-content').hidden = !item;
   $('#world-actions').hidden = !item;
   $('#world-list').innerHTML = state.worlds.map(w => `<button class="world-item ${w.id === selected ? 'selected' : ''}" data-world="${w.id}"><span class="world-glyph">◈</span><span>${escapeHTML(w.name)}<small>${t(w.caves ? 'Surface + caves' : 'Surface only')}</small></span><i class="world-dot ${w.runtime.state === 'running' ? 'online' : ''}"></i></button>`).join('');
@@ -165,21 +171,27 @@ function render() {
   document.querySelectorAll('[data-action]').forEach(button => {
     const action = button.dataset.action;
     const active = runtime && ['running','degraded'].includes(runtime.state);
-    button.disabled = Boolean(busy) || !item || (['save','announce','stop'].includes(action) && !active) || (action === 'start' && active);
+    button.disabled = Boolean(state.busy) || !item || (['save','announce','stop'].includes(action) && !active) || (action === 'start' && active);
+    if (['pause','resume'].includes(action)) {
+      const complete = runtime?.state === 'running' && runtime.shards.length === (item.caves ? 2 : 1);
+      const already = complete && runtime.shards.every(shard => action === 'pause' ? shard.pause_state === 'paused' : ['unpaused','auto_paused'].includes(shard.pause_state));
+      button.disabled ||= !complete || already;
+    }
   });
   renderActivity('#activity-list', state.jobs.filter(job => selected && job.world_id === selected).slice(0, 5));
   renderActivity('#server-activity-list', state.jobs.slice(0, 10), true);
-  $('#server-worlds').innerHTML = state.worlds.map(w => `<button class="server-world-row" data-world="${w.id}"><span><strong>${escapeHTML(w.name)}</strong><small>${escapeHTML(t(w.caves ? 'Surface + caves' : 'Surface only'))}</small></span><span class="status-tag" data-state="${w.runtime.mod_update ? 'starting' : w.runtime.state}">${escapeHTML(w.runtime.mod_update ? t('Updating mods…') : t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[w.runtime.state]))}</span></button>`).join('') || `<p class="quiet-empty">${h('No world yet')}</p>`;
+  $('#server-worlds').innerHTML = state.worlds.map(w => `<button class="server-world-row" data-world="${w.id}"><span><strong>${escapeHTML(w.name)}</strong><small>${escapeHTML(t(w.caves ? 'Surface + caves' : 'Surface only'))}${['running','degraded'].includes(w.runtime.state) ? ' · ' + escapeHTML(t(pauseLabel(w.runtime.pause_state))) : ''}</small></span><span class="status-tag" data-state="${w.runtime.mod_update ? 'starting' : w.runtime.state}">${escapeHTML(w.runtime.mod_update ? t('Updating mods…') : t({running:'Running',stopped:'Stopped',degraded:'Partial',failed:'Exited'}[w.runtime.state]))}</span></button>`).join('') || `<p class="quiet-empty">${h('No world yet')}</p>`;
   if (!item) return;
   $('#mod-count').textContent = item.mods.filter(mod => mod.enabled).length;
   $('#max-players').textContent = t('{count} survivors', {count: item.max_players});
   $('#game-mode').textContent = t(item.game_mode);
   $('#autostart-value').textContent = t(item.autostart ? 'Yes' : 'No');
+  I18n.text('#pause-status-help', runtime.pause_state === 'unknown' ? 'Waiting for DST to report a pause state. Process running does not mean game time is advancing.' : 'Pause status follows DST log events. Pause and Resume apply to both shards; automatic empty-world pausing still applies.');
   $('#shard-list').innerHTML = ['Master', ...(item.caves ? ['Caves'] : [])].map(name => {
     const shard = runtime.shards.find(s => s.name === name);
     const pause = shard?.loaded_pause_when_empty;
-    const pauseLabel = pause === true ? 'Empty-world pause: enabled by DST' : pause === false ? 'Empty-world pause: disabled by DST' : 'Empty-world pause: not reported by DST';
-    return `<article class="shard"><div class="shard-art ${name === 'Caves' ? 'cave-art' : ''}">${name === 'Master' ? '♧' : '◇'}</div><div><h3>${t(name === 'Master' ? 'The surface' : 'The caves')}</h3>${shard?.running ? `<small class="shard-pause-setting">${h(pauseLabel)}</small>` : ''}</div><span class="status-tag ${shard?.running ? 'running' : ''}">${shard?.running ? t('Process running') : shard ? t('Exited · {code}', {code: shard.exit_code}) : t('Stopped')}</span></article>`;
+    const settingLabel = pause === true ? 'Empty-world pause: enabled by DST' : pause === false ? 'Empty-world pause: disabled by DST' : 'Empty-world pause: not reported by DST';
+    return `<article class="shard"><div class="shard-art ${name === 'Caves' ? 'cave-art' : ''}">${name === 'Master' ? '♧' : '◇'}</div><div><h3>${t(name === 'Master' ? 'The surface' : 'The caves')}</h3>${shard?.running ? `<small class="shard-pause-setting">${h(settingLabel)}</small>` : ''}</div><div class="shard-status"><span class="status-tag ${shard?.running ? 'running' : ''}">${shard?.running ? t('Process running') : shard ? t('Exited · {code}', {code: shard.exit_code}) : t('Stopped')}</span>${shard?.running ? `<span class="status-tag" data-state="${escapeHTML(shard.pause_state || 'unknown')}">${h(pauseLabel(shard.pause_state))}</span>` : ''}</div></article>`;
   }).join('');
   const mismatches = runtime.shards.filter(shard => shard.running && typeof shard.loaded_pause_when_empty === 'boolean' && shard.loaded_pause_when_empty !== item.pause_when_empty);
   const pauseWarning = $('#pause-setting-warning');

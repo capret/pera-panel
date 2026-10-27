@@ -195,6 +195,9 @@ def create_app(config, service=None):
         service.store.get(identifier)
         if action in ("start", "stop", "restart"):
             return operation(f"{action.title()} world", lambda: getattr(service, action)(identifier), identifier)
+        if action in ("pause", "resume"):
+            return operation("Pause world" if action == "pause" else "Resume world",
+                             lambda: service.runtime.command(identifier, action), identifier)
         if action in ("save", "announce"):
             message = line(data.get("message", ""), "Announcement", 300, required=action == "announce")
             return operation(f"{action.title()} command", lambda: service.runtime.command(identifier, action, message), identifier)
