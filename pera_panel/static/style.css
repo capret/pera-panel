@@ -215,6 +215,12 @@ summary:hover { color: var(--accent-hover); }
 #player-candidates { max-height: 360px; overflow-y: auto; margin-bottom: 18px; }
 .mod-add { display: flex; align-items: end; gap: 12px; margin-bottom: 24px; }
 .mod-add label { flex: 1; max-width: 380px; margin: 0; }
+.mod-copy { padding: 18px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 7px; background: #f7f9fc; }
+.mod-copy h3 { font-size: 14px; }
+.mod-copy-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-top: 14px; }
+.mod-copy-controls label { flex: 1 1 200px; min-width: 0; margin: 0; }
+.mod-copy-controls select { width: 100%; }
+#copy-mods-hint { margin: 10px 0 0; }
 .mod-row { padding: 18px; border: 1px solid var(--line); border-radius: 7px; margin-top: 14px; }
 .mod-heading { display: flex; align-items: center; gap: 14px; }
 .mod-heading .checkbox { flex: 1; margin: 0; font-weight: 600; }

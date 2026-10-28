@@ -293,6 +293,8 @@ Add a numeric Workshop ID (the `id=` part of its URL). The mod list automaticall
 {"SHOWPLAYERICONS": true}
 ```
 
+To reuse an existing setup, open the destination world's **Workshop mods → Copy from another world**, select a source, and click **Copy mods**. Other saved worlds with mods appear in the selector, including running worlds. Stop the destination first. Copying replaces the editor's list with the source's saved Workshop IDs, enabled/disabled states, and configuration options; confirm before replacing existing edits. Review the copy, then click **Save mods** to apply it to the destination's shards. The source and the destination's other settings and saves stay unchanged. Later edits to either world are independent.
+
 Options are mod-specific; inspect that mod’s `modinfo.lua` or documentation. Arbitrary Lua is not accepted by the editor. The panel writes `dedicated_server_mods_setup.lua` before startup and `modoverrides.lua` for each shard. Enabled mods download sequentially before game launch; the Mods log shows progress. Client-only mods are not supported as server mods. Steam validation may overwrite the setup file; the panel regenerates it on the next start.
 
 Backups are local directories containing the cluster’s saved games, configuration, token, player lists, and mod settings. Downloaded mod binaries are **not** versioned in a backup; Workshop may deliver a newer mod version after restoring. Backups are manual and retained until explicitly deleted. They are not scheduled automatically. The in-game snapshot setting controls DST’s own save history, not panel backup retention.

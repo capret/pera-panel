@@ -61,6 +61,7 @@ async function navigate(path, {replace = false} = {}) {
   currentPage = route.page; selected = route.id; currentTab = route.tab;
   if (state && selected && !world()) { await navigate('/overview', {replace:true}); toast('World not found.', true); return; }
   if (previous !== selected) {
+    $('#copy-mods-source').value = '';
     playerWorld = null; characterWorld = null; playerRows = []; characterRows = []; playerPollAt = 0;
     renderCharacters(); fillSettings(); mods = structuredClone(world()?.mods || []); renderMods();
   }
@@ -119,6 +120,7 @@ function render() {
   if (!state) return;
   const item = world();
   renderUpdates();
+  renderModCopy();
   renderArchives();
   $('#install-notice').hidden = state.game_installed;
   $('#empty-state').hidden = currentPage !== 'server' || state.worlds.length > 0;
@@ -304,6 +306,43 @@ function captureMods() {
     try { mods[index].options = JSON.parse(row.querySelector('textarea').value || '{}'); }
     catch { throw new I18n.Error(msg('Mod {id}: options must be valid JSON.', {id: mods[index].id})); }
   });
+}
+function renderModCopy() {
+  const select = $('#copy-mods-source');
+  const sources = (state?.worlds || []).filter(w => w.id !== selected && w.mods.length);
+  const sourceKey = JSON.stringify([I18n.language, sources.map(w => [w.id, w.name, w.mods.length])]);
+  // Preserve the open selector and choice during dashboard refreshes.
+  if (select.dataset.sources !== sourceKey) {
+    const previous = select.value;
+    select.innerHTML = `<option value="">${escapeHTML(t('Choose a source world'))}</option>` + sources.map(w => `<option value="${w.id}">${escapeHTML(t('{world} · {count} mods', {world:w.name,count:w.mods.length}))}</option>`).join('');
+    select.value = sources.some(w => w.id === previous) ? previous : '';
+    select.dataset.sources = sourceKey;
+  }
+  const active = ['running','degraded'].includes(world()?.runtime.state);
+  select.disabled = !world() || Boolean(state?.busy) || active || !sources.length;
+  $('#copy-mods').disabled = select.disabled || !select.value;
+  const hint = $('#copy-mods-hint');
+  hint.hidden = !active && sources.length > 0;
+  I18n.text(hint, active ? 'Stop this world before copying mod settings.' : 'No other world has saved mods yet.');
+}
+function copyModsFromWorld() {
+  const targetId = selected;
+  const source = state.worlds.find(w => w.id === $('#copy-mods-source').value && w.id !== targetId);
+  if (!source?.mods.length) throw new I18n.Error('Choose another world with saved mods.');
+  // Copy saved values, independent of later edits to either world's configuration.
+  const copied = structuredClone(source.mods);
+  const apply = () => {
+    if (selected !== targetId || !world()) throw new I18n.Error('Select the destination world again before copying mods.');
+    if (state.busy) throw new I18n.Error('Another operation is in progress. Wait for it to finish.');
+    if (['running','degraded'].includes(world().runtime.state)) throw new I18n.Error('Stop this world before copying mod settings.');
+    mods = structuredClone(copied);
+    $('#new-mod-id').value = '';
+    renderMods();
+    toast(msg('Copied {count} mods from {world}. Review the settings, then click Save mods.', {count:mods.length,world:source.name}));
+  };
+  if (mods.length) {
+    confirmAction('Replace mod settings?', msg('Copy {count} saved mods from {world}? This replaces the current mod list and any unsaved mod edits in this editor. Click Save mods afterward to apply.', {count:copied.length,world:source.name}), '', '', apply);
+  } else apply();
 }
 function renderMods() {
   $('#mods-list').innerHTML = mods.map((mod, index) => `<article class="mod-row" data-index="${index}" data-mod-id="${mod.id}"><div class="mod-heading"><label class="checkbox"><input type="checkbox" ${mod.enabled ? 'checked' : ''}><span class="mod-name"></span></label><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.id}" target="_blank" rel="noreferrer" data-i18n>View ↗</a><button class="icon-button remove-mod" data-index="${index}" aria-label="Remove mod ${mod.id}" data-i18n-aria-label="${escapeHTML(JSON.stringify(msg('Remove mod {id}', {id: mod.id})))}">×</button></div><div class="mod-info" aria-live="polite"></div><details><summary data-i18n>Configuration options (JSON)</summary><label><span class="sr-only" data-i18n>Configuration options (JSON)</span><textarea class="code-input" rows="4">${escapeHTML(JSON.stringify(mod.options,null,2))}</textarea></label></details></article>`).join('') || '<div data-i18n class="quiet-empty">No mods added.</div>';
@@ -496,9 +535,11 @@ document.addEventListener('click', async event => {
     }
     if (target.matches('.remove-mod')) { captureMods(); mods.splice(Number(target.dataset.index),1); renderMods(); }
     if (target.matches('.retry-mod-details')) loadModDetails(target.dataset.modId);
+    if (target.id === 'copy-mods') copyModsFromWorld();
     if (target.id === 'save-mods') { captureMods(); await queued(worldURL(),'PATCH',{mods}); }
   } catch (error) { toast(I18n.error(error), true); }
 });
+$('#copy-mods-source').addEventListener('change', renderModCopy);
 WorldSettings.mount($('#create-generation'), {}, {creating:true});
 for (const selector of ['#create-form','#settings-form']) {
   $(selector).addEventListener('change', event => {

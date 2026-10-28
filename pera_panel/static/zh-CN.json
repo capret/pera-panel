@@ -707,5 +707,18 @@
   "DST did not confirm the pause change on every shard. Check the shard logs; the game may have ignored the command.": "游戏未确认所有分片的暂停状态变化。请检查分片日志，游戏可能忽略了指令。",
   "Manual pause is cleared. DST still reports an automatic pause.": "手动暂停已解除。游戏仍报告处于自动暂停状态。",
   "DST confirmed the world is paused.": "游戏已确认世界暂停。",
-  "DST confirmed the world is unpaused.": "游戏已确认世界未暂停。"
+  "DST confirmed the world is unpaused.": "游戏已确认世界未暂停。",
+  "Copy from another world": "从其他世界复制",
+  "Copy saved Workshop IDs, enabled states, and configuration options. Review them below, then click Save mods. The source world stays unchanged.": "复制已保存的创意工坊 ID、启用状态及配置选项。在下方确认后，点击“保存模组”应用。来源世界保持不变。",
+  "Source world": "来源世界",
+  "Choose a source world": "选择来源世界",
+  "{world} · {count} mods": "{world} · {count} 个模组",
+  "Copy mods": "复制模组",
+  "Stop this world before copying mod settings.": "请先停止当前世界，再复制模组设置。",
+  "No other world has saved mods yet.": "尚无其他世界保存了模组。",
+  "Choose another world with saved mods.": "请选择另一个已保存模组的世界。",
+  "Select the destination world again before copying mods.": "请重新选择目标世界，再复制模组。",
+  "Copied {count} mods from {world}. Review the settings, then click Save mods.": "已从 {world} 复制 {count} 个模组。请检查设置，然后点击“保存模组”。",
+  "Replace mod settings?": "替换模组设置？",
+  "Copy {count} saved mods from {world}? This replaces the current mod list and any unsaved mod edits in this editor. Click Save mods afterward to apply.": "从 {world} 复制 {count} 个已保存的模组？这将替换当前编辑器中的模组列表及尚未保存的模组修改。之后请点击“保存模组”应用。"
 }
